@@ -26,8 +26,16 @@ export const REST_POSE = {
   confidence: 0,
 };
 
-const REST_HOLD_SEC = 0.25; // hold the last pose this long past the final keyframe
-const REST_EASE_SEC = 0.3; // then ease toward rest with this time constant
+/**
+ * Defaults for the tail: how long the last pose is held once the playhead
+ * passes the final keyframe, and the time constant it then eases to rest on.
+ *
+ * The hold is insurance against a late batch — closing and reopening reads as
+ * a flicker — but it is also what keeps the mouth hanging open after the bot
+ * finishes a sentence, so it is kept short enough to look deliberate.
+ */
+const REST_HOLD_SEC = 0.1;
+const REST_EASE_SEC = 0.1;
 const PREROLL_SEC = 0.2; // blend rest -> first keyframe over this window
 const PRUNE_HORIZON_SEC = 30; // drop keyframes this far behind the playhead
 const RATE_WINDOW_MS = 5000; // sliding window for msg/s + kf/s rates
@@ -109,6 +117,10 @@ export interface LipsyncFeedOptions {
    * their own on the wire. Must match the server's `scheduling_lead_ms`.
    */
   schedulingLeadSec?: number;
+  /** Seconds the last pose is held after the final keyframe. */
+  restHoldSec?: number;
+  /** Time constant, in seconds, for easing to rest after the hold. */
+  restEaseSec?: number;
 }
 
 export class LipsyncFeed {
@@ -137,9 +149,13 @@ export class LipsyncFeed {
   private lastLeadMs: number | null = null;
   private listeners = new Set<() => void>();
   private schedulingLeadSec: number;
+  private restHoldSec: number;
+  private restEaseSec: number;
 
   constructor(options: LipsyncFeedOptions = {}) {
     this.schedulingLeadSec = options.schedulingLeadSec ?? SCHEDULING_LEAD_SEC;
+    this.restHoldSec = options.restHoldSec ?? REST_HOLD_SEC;
+    this.restEaseSec = options.restEaseSec ?? REST_EASE_SEC;
   }
 
   now(): number {
@@ -237,8 +253,8 @@ export class LipsyncFeed {
 
     // Past the last keyframe: hold briefly, then ease to rest.
     const over = rel - k0.offset;
-    if (over <= REST_HOLD_SEC) return { ...k0, live: true, relTime: rel };
-    const fade = 1 - Math.exp(-(over - REST_HOLD_SEC) / REST_EASE_SEC);
+    if (over <= this.restHoldSec) return { ...k0, live: true, relTime: rel };
+    const fade = 1 - Math.exp(-(over - this.restHoldSec) / this.restEaseSec);
     const k0Pose: ArticulationSample = { ...k0, live: over < 2, relTime: rel };
     const restKf: LipsyncKeyframe = { ...REST_POSE, offset: 0 };
     return { ...lerpPose(k0Pose, restKf, fade), relTime: rel };

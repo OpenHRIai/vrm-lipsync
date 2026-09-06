@@ -164,3 +164,54 @@ describe("consonant events must not swallow the utterance", () => {
     expect(feed.activeEventKinds(feed.now(), 0.05).has("closure")).toBe(true);
   });
 });
+
+describe("the mouth closes promptly after speech ends", () => {
+  // Measured against a real utterance: the tail close was dominated by the
+  // feed's rest hold and ease, not by the smoother — dropping the smoother's
+  // release from 90ms to 35ms moved it by under 70ms. Hold and ease are the
+  // knobs that matter, so keep them honest.
+  function tailCloseMs(opts: { restHoldSec?: number; restEaseSec?: number }) {
+    const feed = new LipsyncFeed(opts);
+    let now = 0;
+    feed.now = () => now;
+    feed.ingest({
+      version: 1,
+      ctx: "tail",
+      keyframes: [0, 0.1].map((offset) => ({
+        offset,
+        openness: 0.95,
+        width: 0.5,
+        rounding: 0.05,
+        energy: 0.8,
+        pitch: 0.5,
+        confidence: 0.4,
+      })),
+      events: [],
+      lead: 0,
+      raw: null,
+    });
+    const src = new ArticulationSource(feed);
+    const dt = 1 / 60;
+    const LAST = 0.1;
+    for (let t = 0; t <= 3; t += dt) {
+      now = t * 1000;
+      const w = src.sampleVisemes(now, dt);
+      const total = Object.values(w).reduce((a, b) => a + b, 0);
+      if (t > LAST && total < 0.1) return Math.round((t - LAST) * 1000);
+    }
+    return Infinity;
+  }
+
+  it("shuts within a few hundred ms of the last keyframe", () => {
+    // Worst case: the utterance ends on a fully open /a/. Real speech tails
+    // off through a closure or a decaying vowel and measured ~270ms; this
+    // bound is the pathological end of that range, not the typical one.
+    expect(tailCloseMs({})).toBeLessThan(500);
+  });
+
+  it("holds longer when configured to, for jitter-prone links", () => {
+    expect(tailCloseMs({ restHoldSec: 0.25, restEaseSec: 0.3 })).toBeGreaterThan(
+      tailCloseMs({}),
+    );
+  });
+});

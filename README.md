@@ -156,6 +156,16 @@ Consonant events are held for `eventHoldSec` (50ms) rather than the feed's
 Driving the lips from that floor keeps them shut for about two-thirds of
 running speech.
 
+How fast the mouth shuts after a sentence is governed by the feed, not the
+smoother — the last pose is held for `restHoldSec` and then eased to rest over
+`restEaseSec`. The hold is insurance against a late batch, since closing and
+reopening reads as a flicker, so raise it on a jittery link and lower it if the
+mouth lingers:
+
+```tsx
+const feed = useLipsyncFeed({ restHoldSec: 0.1, restEaseSec: 0.1 });
+```
+
 Anchors and smoothing are per-model tunable — what "fully open" means differs
 between rigs:
 

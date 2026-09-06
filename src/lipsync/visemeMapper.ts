@@ -226,14 +226,18 @@ export interface SmoothingConfig {
 }
 
 export const DEFAULT_SMOOTHING: SmoothingConfig = {
-  // Tuned against a real utterance: at 0.035/0.06 the mouth moved by up to a
-  // quarter of its range in a single frame at the 95th percentile, which
-  // reads as jitter. These time constants sit well inside a syllable
-  // (~150-250ms), so they take the edge off without blurring articulation.
+  // Time constants sized well inside a syllable (~150-250ms), so they take
+  // the edge off frame-to-frame jitter without blurring articulation.
+  //
+  // Attack and release are near-symmetric on purpose. An earlier version made
+  // the release notably slower, on the theory that closing should lag; with
+  // the event masking fixed, that only made the mouth look like it was
+  // trailing the audio.
   attack: 0.06,
-  release: 0.09,
-  // Kept short deliberately: a lip that shuts late reads as a lip-sync error.
-  closureRelease: 0.03,
+  release: 0.06,
+  // Closures keep the fast path: a lip that shuts late reads as a lip-sync
+  // error, while one that opens late does not.
+  closureRelease: 0.025,
 };
 
 /**

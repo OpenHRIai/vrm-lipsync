@@ -13,6 +13,10 @@ export interface UseLipsyncFeedOptions {
    * nor states its own on the wire. Must match its `scheduling_lead_ms`.
    */
   schedulingLeadSec?: number;
+  /** Seconds the last pose is held after an utterance's final keyframe. */
+  restHoldSec?: number;
+  /** Time constant, in seconds, for easing to rest after that hold. */
+  restEaseSec?: number;
 }
 
 /**
@@ -26,7 +30,12 @@ export interface UseLipsyncFeedOptions {
  */
 export function useLipsyncFeed(options: UseLipsyncFeedOptions = {}): LipsyncFeed {
   const feed = useMemo(
-    () => new LipsyncFeed({ schedulingLeadSec: options.schedulingLeadSec }),
+    () =>
+      new LipsyncFeed({
+        schedulingLeadSec: options.schedulingLeadSec,
+        restHoldSec: options.restHoldSec,
+        restEaseSec: options.restEaseSec,
+      }),
     // Rebuilding the feed mid-call would drop the queue; the lead is read once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
