@@ -40,8 +40,12 @@ export const DEFAULT_EVENT_HOLD_SEC = 0.05;
  * slightly into the future and let the smoother spend that budget catching
  * up. It is free: the server releases keyframes ~200ms ahead of playout, so
  * this window is already buffered.
+ *
+ * Sized to the attack it compensates: with a 30ms attack, 20ms lands onset
+ * error at zero on real speech. Overshooting here is worse than undershooting
+ * — visuals leading audio is noticed sooner than visuals trailing it.
  */
-export const DEFAULT_LOOKAHEAD_SEC = 0.05;
+export const DEFAULT_LOOKAHEAD_SEC = 0.02;
 
 export interface LipsyncSource {
   /**

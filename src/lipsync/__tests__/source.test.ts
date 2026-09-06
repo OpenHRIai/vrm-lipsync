@@ -260,3 +260,51 @@ describe("lookahead compensates the smoother's onset delay", () => {
     expect(firstReachMs(0.05, 0.6)).toBeGreaterThan(-40);
   });
 });
+
+describe("fast vowels reach their target opening", () => {
+  // A rapidly spoken vowel gives the smoother ~100ms to cover its whole
+  // range. Measured on real speech, a 60ms attack reached only 72% of target
+  // on fast vowels: the mouth opened part-way, then began closing again, so
+  // emphatic syllables never landed. Attack must stay well under the length
+  // of a short vowel.
+  function peakReached(vowelSec: number) {
+    const feed = new LipsyncFeed();
+    let now = 0;
+    feed.now = () => now;
+    const rest = { openness: 0.15, width: 0.35, rounding: 0.1, energy: 0, pitch: 0, confidence: 0.4 };
+    const open = { openness: 0.95, width: 0.5, rounding: 0.05, energy: 0.9, pitch: 0.5, confidence: 0.4 };
+    feed.ingest({
+      version: 1,
+      ctx: "burst",
+      keyframes: [
+        { offset: 0, ...rest },
+        { offset: 0.3, ...rest },
+        { offset: 0.32, ...open },
+        { offset: 0.32 + vowelSec, ...open },
+        { offset: 0.34 + vowelSec, ...rest },
+        { offset: 1.5, ...rest },
+      ],
+      events: [],
+      lead: 0,
+      raw: null,
+    });
+    const src = new ArticulationSource(feed);
+    const dt = 1 / 60;
+    let peak = 0;
+    for (let t = 0; t <= 1.5; t += dt) {
+      now = t * 1000;
+      peak = Math.max(peak, Object.values(src.sampleVisemes(now, dt)).reduce((a, b) => a + b, 0));
+    }
+    return peak;
+  }
+
+  it("reaches most of the target on a 100ms vowel", () => {
+    const sustained = peakReached(0.6);
+    expect(peakReached(0.1) / sustained).toBeGreaterThan(0.85);
+  });
+
+  it("still gets most of the way there on a 60ms vowel", () => {
+    const sustained = peakReached(0.6);
+    expect(peakReached(0.06) / sustained).toBeGreaterThan(0.7);
+  });
+});

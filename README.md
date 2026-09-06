@@ -157,7 +157,7 @@ Driving the lips from that floor keeps them shut for about two-thirds of
 running speech.
 
 If the mouth reads as trailing the audio, the first knob is `lookaheadSec`
-(50ms by default). Smoothing reaches a small target immediately but takes
+(20ms by default). Smoothing reaches a small target immediately but takes
 several time constants to reach a large one, so wide openings lag even when
 average alignment is within a frame; sampling that far ahead cancels it at no
 cost in smoothness. Residual A/V skew — jitter buffers, displays, personal
@@ -173,6 +173,12 @@ mouth lingers:
 ```tsx
 const feed = useLipsyncFeed({ restHoldSec: 0.1, restEaseSec: 0.1 });
 ```
+
+Smoothing is deliberately asymmetric: `attack` (30ms) is much faster than
+`release` (60ms). A rapidly spoken vowel gives the smoother only ~100ms to
+cover its range, and a slower attack reaches barely 70% of it — the mouth
+opens part-way and starts closing again, so emphatic syllables never land.
+Downward motion is where twitchiness reads worst, so the release stays slow.
 
 Anchors and smoothing are per-model tunable — what "fully open" means differs
 between rigs:
