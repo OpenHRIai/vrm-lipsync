@@ -119,3 +119,48 @@ describe("scheduling lead", () => {
     expect(feed.relTime(now)! * 1000).toBeCloseTo(-350, 0);
   });
 });
+
+describe("consonant events must not swallow the utterance", () => {
+  // LipsyncFeed.activeEvents applies a 250ms floor so UI badges flash long
+  // enough to see. Driving the mouth from that floor held the lips shut for
+  // 67% of a measured utterance — real closures average 45ms and never
+  // exceeded 120ms — which reads as "barely moving, with occasional jumps".
+  function feedWithEvent(duration: number) {
+    const feed = new LipsyncFeed();
+    feed.ingest({
+      version: 1,
+      ctx: "hold",
+      keyframes: [0, 0.5].map((offset) => ({
+        offset,
+        openness: 0.9,
+        width: 0.5,
+        rounding: 0.05,
+        energy: 0.6,
+        pitch: 0.5,
+        confidence: 0.3,
+      })),
+      events: [{ offset: 0, kind: "closure", duration, confidence: 0.9 }],
+      lead: null,
+      raw: null,
+    });
+    return feed;
+  }
+
+  it("keeps the UI display floor for badges", () => {
+    const feed = feedWithEvent(0.04);
+    feed.offsetTrimMs = -300; // 100ms past the real closure, inside the floor
+    expect(feed.activeEventKinds(feed.now()).has("closure")).toBe(true);
+  });
+
+  it("releases the lips on the real duration when driving articulation", () => {
+    const feed = feedWithEvent(0.04);
+    feed.offsetTrimMs = -300;
+    expect(feed.activeEventKinds(feed.now(), 0.05).has("closure")).toBe(false);
+  });
+
+  it("still holds the lips shut for the length of the closure", () => {
+    const feed = feedWithEvent(0.04);
+    feed.offsetTrimMs = -220; // 20ms in, mid-closure
+    expect(feed.activeEventKinds(feed.now(), 0.05).has("closure")).toBe(true);
+  });
+});

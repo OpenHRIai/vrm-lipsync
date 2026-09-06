@@ -141,6 +141,21 @@ Three things ride on top:
   three axes, so a tightly rounded /u/ reads as strongly articulated while
   genuine silence closes the mouth.
 
+### Calibration
+
+The defaults are tuned against a real utterance rather than idealised values,
+which matters more than it sounds. The analyzer's `confidence` is a composite
+that penalises ordinary formant ambiguity: measured over live speech it ran a
+median of **0.07** and never exceeded **0.5**, nothing like the ~0.9 that
+hand-written fixtures assume. Reading it as a plain 0..1 gain scales the whole
+mouth down to a fraction of its range, so it is normalised against
+`confidenceRef` instead.
+
+Consonant events are held for `eventHoldSec` (50ms) rather than the feed's
+250ms *display* floor, which exists so UI badges flash long enough to see.
+Driving the lips from that floor keeps them shut for about two-thirds of
+running speech.
+
 Anchors and smoothing are per-model tunable — what "fully open" means differs
 between rigs:
 

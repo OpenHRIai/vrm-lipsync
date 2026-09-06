@@ -89,15 +89,28 @@ export interface VisemeMapperConfig {
    * little movement rather than freezing the face mid-utterance.
    */
   minCommit: number;
+  /**
+   * Confidence treated as fully certain.
+   *
+   * The analyzer's confidence is not distributed over 0..1: measured across a
+   * real utterance it runs a median of 0.07 and never exceeded 0.5, because
+   * it is a composite that penalises ordinary formant ambiguity. Reading it
+   * as a 0..1 gain therefore scales the whole mouth down to a fraction of its
+   * intended range. Normalising against a realistic ceiling keeps confidence
+   * discriminating between clear and unclear frames without flattening
+   * everything.
+   */
+  confidenceRef: number;
 }
 
 export const DEFAULT_MAPPER_CONFIG: VisemeMapperConfig = {
   anchors: DEFAULT_ANCHORS,
   sharpness: 2,
   axisWeights: { openness: 1, width: 0.7, rounding: 1.1 },
-  activationDistance: 0.7,
+  activationDistance: 0.5,
   gain: 1,
-  minCommit: 0.35,
+  minCommit: 0.75,
+  confidenceRef: 0.35,
 };
 
 /**
@@ -195,7 +208,8 @@ export function mapToVisemes(
  * than confidently rendering a guess.
  */
 function commitOf(sample: ArticulationSample, cfg: VisemeMapperConfig): number {
-  return cfg.minCommit + (1 - cfg.minCommit) * clamp01(sample.confidence);
+  const normalized = clamp01(sample.confidence / Math.max(cfg.confidenceRef, 1e-6));
+  return cfg.minCommit + (1 - cfg.minCommit) * normalized;
 }
 
 function clamp01(v: number): number {
@@ -212,9 +226,14 @@ export interface SmoothingConfig {
 }
 
 export const DEFAULT_SMOOTHING: SmoothingConfig = {
-  attack: 0.035,
-  release: 0.06,
-  closureRelease: 0.02,
+  // Tuned against a real utterance: at 0.035/0.06 the mouth moved by up to a
+  // quarter of its range in a single frame at the 95th percentile, which
+  // reads as jitter. These time constants sit well inside a syllable
+  // (~150-250ms), so they take the edge off without blurring articulation.
+  attack: 0.06,
+  release: 0.09,
+  // Kept short deliberately: a lip that shuts late reads as a lip-sync error.
+  closureRelease: 0.03,
 };
 
 /**

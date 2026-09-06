@@ -31,7 +31,16 @@ const REST_EASE_SEC = 0.3; // then ease toward rest with this time constant
 const PREROLL_SEC = 0.2; // blend rest -> first keyframe over this window
 const PRUNE_HORIZON_SEC = 30; // drop keyframes this far behind the playhead
 const RATE_WINDOW_MS = 5000; // sliding window for msg/s + kf/s rates
-const MIN_EVENT_ACTIVE_SEC = 0.25; // floor so zero-duration events still flash
+/**
+ * Display floor: how long a zero-duration event stays "active" for UI purposes,
+ * so badges and timelines flash long enough to see.
+ *
+ * Do NOT use this when driving a mouth. Real closures run ~40-120ms, so a
+ * 250ms floor holds the lips shut several times longer than the consonant
+ * lasts — over a whole utterance that silences most of the speech.
+ * `activeEvents` takes an override for that.
+ */
+const MIN_EVENT_ACTIVE_SEC = 0.25;
 
 export interface ArticulationSample {
   openness: number;
@@ -235,17 +244,23 @@ export class LipsyncFeed {
     return { ...lerpPose(k0Pose, restKf, fade), relTime: rel };
   }
 
-  /** Events whose span covers the playhead (for badges/flashes). */
-  activeEvents(nowMs: number): LipsyncEvent[] {
+  /**
+   * Events whose span covers the playhead.
+   *
+   * @param minActiveSec Floor applied to each event's duration. Defaults to
+   * the UI display floor; pass a smaller value (roughly the length of a real
+   * consonant) when using these to drive articulation.
+   */
+  activeEvents(nowMs: number, minActiveSec = MIN_EVENT_ACTIVE_SEC): LipsyncEvent[] {
     const rel = this.relTime(nowMs);
     if (rel === null) return [];
     return this.evs.filter(
-      (e) => rel >= e.offset && rel <= e.offset + Math.max(e.duration, MIN_EVENT_ACTIVE_SEC),
+      (e) => rel >= e.offset && rel <= e.offset + Math.max(e.duration, minActiveSec),
     );
   }
 
-  activeEventKinds(nowMs: number): Set<LipsyncEventKind> {
-    return new Set(this.activeEvents(nowMs).map((e) => e.kind));
+  activeEventKinds(nowMs: number, minActiveSec?: number): Set<LipsyncEventKind> {
+    return new Set(this.activeEvents(nowMs, minActiveSec).map((e) => e.kind));
   }
 
   statsSnapshot(nowMs: number): FeedStats {

@@ -148,3 +148,38 @@ describe("VisemeSmoother", () => {
     expect(closing.value.aa).toBeLessThan(normal.value.aa);
   });
 });
+
+describe("calibration against real analyzer output", () => {
+  // The analyzer's confidence is a composite that penalises ordinary formant
+  // ambiguity. Measured over a real utterance it ran a median of 0.07 and
+  // never exceeded 0.5 — nothing like the 0.9 that synthetic fixtures use.
+  // Treating it as a plain 0..1 gain put 29% of voiced frames below visibility
+  // and capped the mouth at 59% open, which reads as "barely moving, with
+  // occasional jumps".
+  const REAL_CONFIDENCE_MEDIAN = 0.07;
+
+  it("stays visible at the confidence the analyzer actually reports", () => {
+    // A middling articulation, roughly the median of a real utterance.
+    const s = sample({
+      openness: 0.25,
+      width: 0.48,
+      rounding: 0.21,
+      energy: 0.53,
+      confidence: REAL_CONFIDENCE_MEDIAN,
+    });
+    expect(sum(mapToVisemes(s))).toBeGreaterThan(0.2);
+  });
+
+  it("still opens fully on an emphatic open vowel", () => {
+    const s = sample({ ...DEFAULT_ANCHORS.aa, energy: 0.9, confidence: 0.3 });
+    expect(sum(mapToVisemes(s))).toBeGreaterThan(0.75);
+  });
+
+  it("keeps confidence discriminating across its real range", () => {
+    const at = (confidence: number) =>
+      sum(mapToVisemes(sample({ openness: 0.5, width: 0.5, rounding: 0.4, confidence })));
+    // Spanning the observed median to the observed maximum must produce a
+    // visible difference, or confidence has stopped meaning anything.
+    expect(at(0.5) - at(REAL_CONFIDENCE_MEDIAN)).toBeGreaterThan(0.1);
+  });
+});
