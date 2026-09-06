@@ -6,8 +6,13 @@ import type {
 } from "./protocol";
 
 /**
- * Server releases each batch this far ahead of its window's audio playout
- * (LipsyncParams.scheduling_lead_ms default).
+ * Fallback for how far ahead of playout the server releases each batch,
+ * matching `LipsyncParams.scheduling_lead_ms`'s default of 200ms.
+ *
+ * Only a fallback: the lead is the *server's* setting, and a server that
+ * tunes it would silently desync a client hardcoded to this value. Prefer a
+ * server that states its lead on the wire (see `LipsyncBatch.lead`); failing
+ * that, pass the matching value to the `LipsyncFeed` constructor.
  */
 export const SCHEDULING_LEAD_SEC = 0.2;
 
@@ -84,13 +89,26 @@ function lerpPose(
  * Buffers lipsync batches and plays them back on a wall-clock timeline.
  *
  * Keyframe offsets are utterance-relative, and the server releases each batch
- * SCHEDULING_LEAD_SEC ahead of its audio, so a batch's arrival time implies
+ * a known lead ahead of its audio, so a batch's arrival time implies
  * where the utterance's t=0 sits on the wall clock ("anchor"). Batches are
  * stored in offset space; `sample()` maps the wall clock through the anchor
  * and interpolates between the bracketing keyframes.
  */
+export interface LipsyncFeedOptions {
+  /**
+   * Assumed release lead in seconds, used only for servers that do not state
+   * their own on the wire. Must match the server's `scheduling_lead_ms`.
+   */
+  schedulingLeadSec?: number;
+}
+
 export class LipsyncFeed {
-  /** User-adjustable A/V trim in ms (positive delays the mouth). */
+  /**
+   * User-adjustable A/V trim in ms (positive delays the mouth).
+   *
+   * Distinct from the scheduling lead: that is a fact about the server, this
+   * is a human nudge for jitter-buffer skew and personal taste.
+   */
   offsetTrimMs = 0;
 
   lastBatch: LipsyncBatch | null = null;
@@ -109,6 +127,11 @@ export class LipsyncFeed {
   private resyncs = 0;
   private lastLeadMs: number | null = null;
   private listeners = new Set<() => void>();
+  private schedulingLeadSec: number;
+
+  constructor(options: LipsyncFeedOptions = {}) {
+    this.schedulingLeadSec = options.schedulingLeadSec ?? SCHEDULING_LEAD_SEC;
+  }
 
   now(): number {
     return performance.now();
@@ -119,7 +142,10 @@ export class LipsyncFeed {
     const first = batch.keyframes[0]?.offset ?? batch.events[0]?.offset;
     if (first === undefined) return;
 
-    const impliedAnchor = now + SCHEDULING_LEAD_SEC * 1000 - first * 1000;
+    // A server that declares its own lead wins: it knows the value, and a
+    // batch-by-batch reading survives the server being reconfigured mid-run.
+    const leadSec = batch.lead ?? this.schedulingLeadSec;
+    const impliedAnchor = now + leadSec * 1000 - first * 1000;
     let anchor = this.anchorMs;
     if (batch.ctx !== this.ctx || anchor === null) {
       // New utterance (or first ever): drop the old queue and re-anchor.

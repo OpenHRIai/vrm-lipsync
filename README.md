@@ -151,6 +151,25 @@ between rigs:
 />
 ```
 
+## Sync and the scheduling lead
+
+The server releases each batch a fixed time *ahead* of the matching audio
+(`scheduling_lead_ms`, 200 ms by default), and the client uses that to work out
+where the utterance's t=0 sits on the wall clock. Get it wrong and the mouth is
+consistently early or late.
+
+The lead belongs to the server, so the right place for it is the wire: if a
+batch carries a `lead` field (in seconds) it is used directly, per batch, and
+nothing needs configuring. Otherwise the client assumes 200 ms — override that
+only if your server tunes `scheduling_lead_ms` and does not report it:
+
+```tsx
+const feed = useLipsyncFeed({ schedulingLeadSec: 0.35 });
+```
+
+`offsetTrimMs` is a separate knob: the lead is a fact about the server, the
+trim is a human nudge for jitter-buffer skew and taste.
+
 ## Compressed models
 
 Optimized VRMs — RapidPipeline, gltfpack, gltf-transform — usually require

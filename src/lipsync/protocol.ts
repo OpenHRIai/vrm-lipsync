@@ -38,6 +38,13 @@ export interface LipsyncBatch {
   ctx: string | null;
   keyframes: LipsyncKeyframe[];
   events: LipsyncEvent[];
+  /**
+   * Seconds ahead of playout this batch was released, when the server states
+   * it. The lead is the server's own setting (`scheduling_lead_ms`), so a
+   * server that declares it lets the client stay in sync without being
+   * configured to match. `null` when absent — see `LipsyncFeed`.
+   */
+  lead: number | null;
   /** Original message data, for the raw inspector. */
   raw: unknown;
 }
@@ -55,6 +62,7 @@ export function parseLipsyncData(data: unknown): LipsyncBatch | null {
   return {
     version: typeof d.version === "number" ? d.version : 1,
     ctx: typeof d.ctx === "string" ? d.ctx : null,
+    lead: typeof d.lead === "number" ? d.lead : null,
     keyframes: kf.map(
       ([offset, openness, width, rounding, energy, pitch, confidence]) => ({
         offset: t0 + offset,

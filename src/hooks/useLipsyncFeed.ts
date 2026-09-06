@@ -8,6 +8,11 @@ import { parseLipsyncData } from "../lipsync/protocol";
 export interface UseLipsyncFeedOptions {
   /** A/V trim in ms; positive delays the mouth relative to the audio. */
   offsetTrimMs?: number;
+  /**
+   * Only needed for a server that neither uses the default 200ms release lead
+   * nor states its own on the wire. Must match its `scheduling_lead_ms`.
+   */
+  schedulingLeadSec?: number;
 }
 
 /**
@@ -20,7 +25,12 @@ export interface UseLipsyncFeedOptions {
  * Must be called inside a `PipecatClientProvider`.
  */
 export function useLipsyncFeed(options: UseLipsyncFeedOptions = {}): LipsyncFeed {
-  const feed = useMemo(() => new LipsyncFeed(), []);
+  const feed = useMemo(
+    () => new LipsyncFeed({ schedulingLeadSec: options.schedulingLeadSec }),
+    // Rebuilding the feed mid-call would drop the queue; the lead is read once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   useEffect(() => {
     feed.offsetTrimMs = options.offsetTrimMs ?? 0;

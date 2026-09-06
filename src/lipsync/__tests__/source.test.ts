@@ -20,6 +20,7 @@ function feedHolding(vowel: keyof typeof DEFAULT_ANCHORS): LipsyncFeed {
       confidence: 0.9,
     })),
     events: [],
+    lead: null,
     raw: null,
   });
   // Advance the playhead into the batch without waiting on the wall clock.
@@ -70,5 +71,51 @@ describe("LipsyncSource", () => {
     expect(isLipsyncSource(new LipsyncFeed())).toBe(false);
     expect(isLipsyncSource(null)).toBe(false);
     expect(isLipsyncSource({})).toBe(false);
+  });
+});
+
+describe("scheduling lead", () => {
+  function batchAt(offset: number, lead: number | null) {
+    return {
+      version: 1,
+      ctx: "lead-test",
+      keyframes: [
+        {
+          offset,
+          openness: 0.9,
+          width: 0.5,
+          rounding: 0.05,
+          energy: 0.6,
+          pitch: 0.5,
+          confidence: 0.9,
+        },
+      ],
+      events: [],
+      lead,
+      raw: null,
+    };
+  }
+
+  it("defaults to the server's documented 200ms lead", () => {
+    const feed = new LipsyncFeed();
+    const now = feed.now();
+    feed.ingest(batchAt(0, null));
+    // Anchor sits 200ms ahead, so the playhead is 200ms before t=0.
+    expect(feed.relTime(now)! * 1000).toBeCloseTo(-200, 0);
+  });
+
+  it("honours a configured lead when the server does not state one", () => {
+    const feed = new LipsyncFeed({ schedulingLeadSec: 0.5 });
+    const now = feed.now();
+    feed.ingest(batchAt(0, null));
+    expect(feed.relTime(now)! * 1000).toBeCloseTo(-500, 0);
+  });
+
+  it("prefers the lead the server declares over the configured one", () => {
+    // The server knows its own setting; a stale client config must not win.
+    const feed = new LipsyncFeed({ schedulingLeadSec: 0.5 });
+    const now = feed.now();
+    feed.ingest(batchAt(0, 0.35));
+    expect(feed.relTime(now)! * 1000).toBeCloseTo(-350, 0);
   });
 });
