@@ -1,0 +1,101 @@
+{
+  "name": "@openhri/vrm-lipsync",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "VRM avatar with phonetically-driven lipsync for Pipecat voice agents.",
+  "keywords": [
+    "vrm",
+    "avatar",
+    "lipsync",
+    "viseme",
+    "pipecat",
+    "voice-ui-kit",
+    "three",
+    "react"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "github:OpenHRIai/vrm-lipsync"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./lipsync": {
+      "types": "./dist/lipsync.d.ts",
+      "import": "./dist/lipsync.js",
+      "require": "./dist/lipsync.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "peerDependencies": {
+    "@pipecat-ai/client-js": ">=1.13.0",
+    "@pipecat-ai/client-react": ">=1.8.0",
+    "@pixiv/three-vrm": ">=3.0.0",
+    "@pixiv/three-vrm-animation": ">=3.0.0",
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0",
+    "three": ">=0.157.0"
+  },
+  "peerDependenciesMeta": {
+    "@pipecat-ai/client-js": {
+      "optional": true
+    },
+    "@pipecat-ai/client-react": {
+      "optional": true
+    },
+    "@pixiv/three-vrm": {
+      "optional": true
+    },
+    "@pixiv/three-vrm-animation": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "three": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint ./src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@pipecat-ai/client-js": "^1.13.0",
+    "@pipecat-ai/client-react": "^1.8.0",
+    "@pixiv/three-vrm": "^3.5.5",
+    "@pixiv/three-vrm-animation": "^3.5.5",
+    "@types/react": "^19.1.16",
+    "@types/three": "^0.177.0",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "three": "^0.180.0",
+    "tsup": "^8.5.0",
+    "typescript": "~5.8.3",
+    "vitest": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

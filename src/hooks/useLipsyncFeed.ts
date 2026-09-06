@@ -1,0 +1,47 @@
+import { RTVIEvent } from "@pipecat-ai/client-js";
+import { useRTVIClientEvent } from "@pipecat-ai/client-react";
+import { useCallback, useEffect, useMemo } from "react";
+
+import { LipsyncFeed } from "../lipsync/feed";
+import { parseLipsyncData } from "../lipsync/protocol";
+
+export interface UseLipsyncFeedOptions {
+  /** A/V trim in ms; positive delays the mouth relative to the audio. */
+  offsetTrimMs?: number;
+}
+
+/**
+ * Subscribes to the bot's lipsync stream and returns a feed to render from.
+ *
+ * Lipsync batches arrive as ordinary RTVI `server-message`s, so nothing beyond
+ * a stock Pipecat client is required — `parseLipsyncData` demuxes on
+ * `data.type === "bot-tts-lipsync"` and ignores every other server message.
+ *
+ * Must be called inside a `PipecatClientProvider`.
+ */
+export function useLipsyncFeed(options: UseLipsyncFeedOptions = {}): LipsyncFeed {
+  const feed = useMemo(() => new LipsyncFeed(), []);
+
+  useEffect(() => {
+    feed.offsetTrimMs = options.offsetTrimMs ?? 0;
+  }, [feed, options.offsetTrimMs]);
+
+  useRTVIClientEvent(
+    RTVIEvent.ServerMessage,
+    useCallback(
+      (data: unknown) => {
+        const batch = parseLipsyncData(data);
+        if (batch) feed.ingest(batch);
+      },
+      [feed],
+    ),
+  );
+
+  // A disconnect leaves the feed anchored to a dead utterance clock.
+  useRTVIClientEvent(
+    RTVIEvent.Disconnected,
+    useCallback(() => feed.reset(), [feed]),
+  );
+
+  return feed;
+}
