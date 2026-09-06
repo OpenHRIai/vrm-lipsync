@@ -209,19 +209,26 @@ npm test
 npm run typecheck
 ```
 
-### Example app
+### Examples
 
-A local demo drives the avatar from a synthetic articulation stream, so you can
-work on the mapping without running a bot:
+Two, in [`examples/`](./examples):
 
 ```bash
-npm --prefix example install
-npm --prefix example run dev
+npm --prefix examples/01-synthetic install
+npm --prefix examples/01-synthetic run dev
 ```
 
-Drag to orbit, scroll to zoom. "Speak" cycles the five vowels with a consonant
-closure between words; the Hold buttons pin one vowel so its mouth shape can be
-inspected on your own model. Live viseme weights are shown as bars.
+**[`01-synthetic`](./examples/01-synthetic)** needs no server, no API keys and
+no audio — it fabricates the batches a server would send. Drag to orbit, scroll
+to zoom; "Speak" cycles the five vowels with a consonant closure between words,
+and the Hold buttons pin one vowel so its mouth shape can be inspected against
+your own model. Live viseme weights are shown as bars. This is the one for
+tuning `mapperConfig`.
+
+**[`02-pipecat-bot`](./examples/02-pipecat-bot)** runs a real Pipecat bot and
+drives the avatar from its lipsync stream inside a voice-ui-kit UI. Slower to
+set up — it needs API keys — but it is the only way to judge sync against
+speech you can actually hear.
 
 ## Licence
 

@@ -1,0 +1,30 @@
+{
+  "name": "vrm-lipsync-example-pipecat-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pipecat-ai/client-js": "^1.13.0",
+    "@pipecat-ai/client-react": "^1.8.0",
+    "@pipecat-ai/small-webrtc-transport": "^1.9.0",
+    "@pipecat-ai/voice-ui-kit": "^0.13.1",
+    "@pixiv/three-vrm": "^3.5.5",
+    "@pixiv/three-vrm-animation": "^3.5.5",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.16",
+    "@types/react-dom": "^19.1.9",
+    "@types/three": "^0.177.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.1.11",
+    "@types/node": "^22.18.8"
+  }
+}

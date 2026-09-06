@@ -1,5 +1,5 @@
 {
-  "name": "vrm-lipsync-example",
+  "name": "vrm-lipsync-example-synthetic",
   "private": true,
   "type": "module",
   "scripts": { "dev": "vite", "build": "vite build" },
