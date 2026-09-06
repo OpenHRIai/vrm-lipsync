@@ -156,6 +156,14 @@ Consonant events are held for `eventHoldSec` (50ms) rather than the feed's
 Driving the lips from that floor keeps them shut for about two-thirds of
 running speech.
 
+If the mouth reads as trailing the audio, the first knob is `lookaheadSec`
+(50ms by default). Smoothing reaches a small target immediately but takes
+several time constants to reach a large one, so wide openings lag even when
+average alignment is within a frame; sampling that far ahead cancels it at no
+cost in smoothness. Residual A/V skew — jitter buffers, displays, personal
+taste — belongs in `offsetTrimMs` instead, where negative moves the mouth
+earlier.
+
 How fast the mouth shuts after a sentence is governed by the feed, not the
 smoother — the last pose is held for `restHoldSec` and then eased to rest over
 `restEaseSec`. The hold is insurance against a late batch, since closing and

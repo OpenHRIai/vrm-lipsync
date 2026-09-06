@@ -33,6 +33,7 @@ export {
 export {
   ArticulationSource,
   DEFAULT_EVENT_HOLD_SEC,
+  DEFAULT_LOOKAHEAD_SEC,
   isLipsyncSource,
   type LipsyncSource,
 } from "./source";

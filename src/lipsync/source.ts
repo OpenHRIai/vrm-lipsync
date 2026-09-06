@@ -27,6 +27,22 @@ import {
  */
 export const DEFAULT_EVENT_HOLD_SEC = 0.05;
 
+/**
+ * How far ahead of the playhead to sample, in seconds.
+ *
+ * Exponential smoothing reaches a *small* target almost immediately but takes
+ * several time constants to reach a large one. Measured on real speech, the
+ * average alignment was only one frame out, yet reaching a wide-open mouth
+ * lagged its target by a median of 167ms — which is what reads as "the
+ * visuals are behind", since onset is what the eye actually tracks.
+ *
+ * Rather than shortening the smoothing and reintroducing jitter, we sample
+ * slightly into the future and let the smoother spend that budget catching
+ * up. It is free: the server releases keyframes ~200ms ahead of playout, so
+ * this window is already buffered.
+ */
+export const DEFAULT_LOOKAHEAD_SEC = 0.05;
+
 export interface LipsyncSource {
   /**
    * Vowel weights for this instant.
@@ -52,6 +68,7 @@ export class ArticulationSource implements LipsyncSource {
   private smoother: VisemeSmoother;
   private mapperConfig?: Partial<VisemeMapperConfig>;
   private eventHoldSec: number;
+  private lookaheadSec: number;
 
   constructor(
     feed: LipsyncFeed,
@@ -65,17 +82,24 @@ export class ArticulationSource implements LipsyncSource {
        * longer and the mouth spends the utterance closed.
        */
       eventHoldSec?: number;
+      /**
+       * Seconds to sample ahead of the playhead, compensating the smoother's
+       * own delay. Set to 0 to disable.
+       */
+      lookaheadSec?: number;
     } = {},
   ) {
     this.feed = feed;
     this.mapperConfig = options.mapperConfig;
     this.eventHoldSec = options.eventHoldSec ?? DEFAULT_EVENT_HOLD_SEC;
+    this.lookaheadSec = options.lookaheadSec ?? DEFAULT_LOOKAHEAD_SEC;
     this.smoother = new VisemeSmoother(options.smoothingConfig);
   }
 
   sampleVisemes(nowMs: number, deltaSec: number): VisemeWeights {
-    const sample = this.feed.sample(nowMs);
-    const events = this.feed.activeEventKinds(nowMs, this.eventHoldSec);
+    const at = nowMs + this.lookaheadSec * 1000;
+    const sample = this.feed.sample(at);
+    const events = this.feed.activeEventKinds(at, this.eventHoldSec);
     const target = mapToVisemes(sample, events, this.mapperConfig);
     const fastClose = events.has("closure") || events.has("nasal");
     return this.smoother.update(target, deltaSec, { fastClose });

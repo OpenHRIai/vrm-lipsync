@@ -215,3 +215,48 @@ describe("the mouth closes promptly after speech ends", () => {
     );
   });
 });
+
+describe("lookahead compensates the smoother's onset delay", () => {
+  // Exponential smoothing reaches a small target at once but takes several
+  // time constants to reach a large one, so wide openings arrived ~83ms late
+  // even though average alignment was within a frame. Sampling ahead spends
+  // the smoother's budget in advance; the window is already buffered because
+  // the server releases keyframes ~200ms ahead of playout.
+  function firstReachMs(lookaheadSec: number, level: number) {
+    const feed = new LipsyncFeed();
+    let now = 0;
+    feed.now = () => now;
+    feed.ingest({
+      version: 1,
+      ctx: "onset",
+      // Shut, then abruptly wide open at t=0.5s.
+      keyframes: [
+        { offset: 0, openness: 0.15, width: 0.35, rounding: 0.1, energy: 0, pitch: 0, confidence: 0.4 },
+        { offset: 0.49, openness: 0.15, width: 0.35, rounding: 0.1, energy: 0, pitch: 0, confidence: 0.4 },
+        { offset: 0.5, openness: 0.95, width: 0.5, rounding: 0.05, energy: 0.9, pitch: 0.5, confidence: 0.4 },
+        { offset: 1.5, openness: 0.95, width: 0.5, rounding: 0.05, energy: 0.9, pitch: 0.5, confidence: 0.4 },
+      ],
+      events: [],
+      lead: 0,
+      raw: null,
+    });
+    const src = new ArticulationSource(feed, { lookaheadSec });
+    const dt = 1 / 60;
+    for (let t = 0; t <= 2; t += dt) {
+      now = t * 1000;
+      const total = Object.values(src.sampleVisemes(now, dt)).reduce((a, b) => a + b, 0);
+      if (total >= level) return Math.round((t - 0.5) * 1000);
+    }
+    return Infinity;
+  }
+
+  it("reaches a wide opening sooner than with no lookahead", () => {
+    expect(firstReachMs(0.05, 0.6)).toBeLessThan(firstReachMs(0, 0.6));
+  });
+
+  it("does not run ahead of the audio by a perceptible margin", () => {
+    // Visual leading audio is tolerated less than lagging, so the default
+    // must not overshoot into the mouth moving before the sound.
+    expect(firstReachMs(0.05, 0.6)).toBeGreaterThan(-40);
+  });
+});
