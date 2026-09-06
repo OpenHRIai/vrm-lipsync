@@ -12,6 +12,7 @@ export {
   REST_POSE,
   SCHEDULING_LEAD_SEC,
   type ArticulationSample,
+  type LipsyncFeedOptions,
   type FeedStats,
   type LoggedEvent,
 } from "./feed";
@@ -31,6 +32,7 @@ export {
 
 export {
   ArticulationSource,
+  DEFAULT_EVENT_HOLD_SEC,
   isLipsyncSource,
   type LipsyncSource,
 } from "./source";
