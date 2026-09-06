@@ -21,6 +21,10 @@ import { VRMAvatar, useLipsyncFeed } from "@openhri/vrm-lipsync";
 function Avatar() {
   const feed = useLipsyncFeed();
 
+  // Dev hook: inspect the live stream from the console, e.g.
+  //   lipsyncFeed.statsSnapshot(lipsyncFeed.now())
+  if (import.meta.env.DEV) Object.assign(window, { lipsyncFeed: feed });
+
   return (
     <VRMAvatar
       modelUrl="/RikiMinami.vrm"
@@ -49,8 +53,12 @@ export function App() {
           error,
           handleConnect,
           handleDisconnect,
-        }: PipecatBaseChildProps) =>
-          error ? (
+        }: PipecatBaseChildProps) => {
+          // Dev hook: raw client access, e.g.
+          //   pipecatClient.on("serverMessage", console.log)
+          if (import.meta.env.DEV) Object.assign(window, { pipecatClient: client });
+
+          return error ? (
             <ErrorCard>{error}</ErrorCard>
           ) : !client ? (
             <SpinLoader />
@@ -65,8 +73,8 @@ export function App() {
                 <UserAudioControl />
               </ControlBar>
             </div>
-          )
-        }
+          );
+        }}
       </PipecatAppBase>
     </FullScreenContainer>
   );

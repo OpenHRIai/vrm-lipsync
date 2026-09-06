@@ -1,1 +1,7 @@
+# Upstream bot, fetched by setup.sh
 vendor/
+
+# API keys — never commit
+.env
+.env.*
+!.env.example
