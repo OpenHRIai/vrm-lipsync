@@ -41,11 +41,18 @@ export const DEFAULT_EVENT_HOLD_SEC = 0.05;
  * up. It is free: the server releases keyframes ~200ms ahead of playout, so
  * this window is already buffered.
  *
- * Sized to the attack it compensates: with a 30ms attack, 20ms lands onset
- * error at zero on real speech. Overshooting here is worse than undershooting
- * — visuals leading audio is noticed sooner than visuals trailing it.
+ * Sized to the attack it compensates. Against the *keyframe* timeline a 30ms
+ * attack wants ~20ms here, but that timeline is not what a viewer sees: a
+ * WebRTC audio track goes through a jitter buffer while data-channel messages
+ * do not, so the sound lands tens of milliseconds after the keyframes
+ * describing it. That biases the mouth early, and early is the worse
+ * direction — visuals leading audio is noticed sooner than visuals trailing.
+ *
+ * So the default gives the compensation back to the transport. Raise it if
+ * your mouth trails; if it runs ahead, `offsetTrimMs` is the knob, since the
+ * residual is a property of your transport rather than of the smoothing.
  */
-export const DEFAULT_LOOKAHEAD_SEC = 0.02;
+export const DEFAULT_LOOKAHEAD_SEC = 0;
 
 export interface LipsyncSource {
   /**
