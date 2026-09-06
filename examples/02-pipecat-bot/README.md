@@ -52,8 +52,15 @@ about sync.
 - **Interruptions.** Talk over the bot. Unplayed keyframes are dropped with
   the audio they describe, so the mouth should stop with the voice rather than
   finishing a sentence on its own.
-- **Sync.** If the mouth leads or trails consistently, that is the scheduling
-  lead, not the mapper — see "Sync and the scheduling lead" in the root README.
+- **Sync.** Drag the **A/V trim** slider while it talks. It writes straight to
+  `feed.offsetTrimMs`, so it takes effect on the next rendered frame — no
+  reconnect, which matters because the bot serves one conversation per start.
+  Negative moves the mouth earlier. Find the value that looks right, then set
+  it once via `useLipsyncFeed({ offsetTrimMs })`.
+
+  If you land far from zero, that is worth knowing: a consistent offset points
+  at the scheduling lead or a jitter buffer rather than the mapper — see "Sync
+  and the scheduling lead" in the root README.
 
 ## Swapping the model
 
