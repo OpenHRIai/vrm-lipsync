@@ -1,20 +1,20 @@
 {
- "text": "Oooo.",
+ "text": "Who.",
  "text_timing": {
   "version": 1,
   "origin": "first-audio-receipt",
   "anchors": [
    [
-    "Oooo.",
-    -0.094733958,
+    "Who.",
+    -0.100341375,
     0.0
    ]
   ],
   "words": [
    [
-    "Oooo.",
-    0.118685747,
-    0.554
+    "Who.",
+    0.119517258,
+    0.354
    ]
   ]
  }

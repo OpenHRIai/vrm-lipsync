@@ -80,21 +80,28 @@ WARMUP = [
 
 # VRM preset names are not the vowels they sound like: `ih` is /i/ as in
 # "see", `ee` is /e/ as in "bed". `expect` is always the VRM preset.
+#
+# Real dictionary words, not spellings like "Eeee." or "Oo.": the bot speaks
+# words, and the analyzer's text tier only engages when every word of a
+# sentence is in its pronouncing dictionary — one unknown word ("oo") leaves
+# the whole sentence to the DSP alone. Each word carries one vowel after an
+# /h/ (or before a light coda), with no lip-closing or nasal consonants to
+# blur the mouth shape under test.
 PROBES = [
-    ("ih-isolated", "ih", "Eeee."),
+    ("ih-he", "ih", "He."),
     ("ih-heed", "ih", "Heed."),
-    ("aa-isolated", "aa", "Ahhh."),
+    ("aa-ha", "aa", "Ha."),
     ("aa-hot", "aa", "Hot."),
-    ("ou-isolated", "ou", "Oooo."),
+    ("ou-who", "ou", "Who."),
     ("ou-whod", "ou", "Who'd."),
-    ("ee-isolated", "ee", "Ehh."),
+    ("ee-heh", "ee", "Heh."),
     ("ee-head", "ee", "Head."),
-    ("oh-isolated", "oh", "Ohhh."),
-    ("oh-hoed", "oh", "Hoed."),
+    ("oh-hoe", "oh", "Hoe."),
+    ("oh-hose", "oh", "Hose."),
 ]
 
 # The way a user actually asks for it: one utterance, five vowels in a row.
-SEQUENCE = ("sequence", ["ih", "aa", "ou", "oh", "ee"], "Ee. Ah. Oo. Oh. Eh.")
+SEQUENCE = ("sequence", ["ih", "aa", "ou", "oh", "ee"], "He. Ha. Who. Hoe. Heh.")
 
 HOP_SEC = 0.02
 # Speech is split into bursts at gaps quieter than this fraction of the
