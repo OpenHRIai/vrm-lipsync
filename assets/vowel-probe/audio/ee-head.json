@@ -1,0 +1,21 @@
+{
+ "text": "Head.",
+ "text_timing": {
+  "version": 1,
+  "origin": "first-audio-receipt",
+  "anchors": [
+   [
+    "Head.",
+    -0.0977165,
+    0.0
+   ]
+  ],
+  "words": [
+   [
+    "Head.",
+    0.117783503,
+    0.354
+   ]
+  ]
+ }
+}

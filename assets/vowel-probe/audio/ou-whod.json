@@ -1,0 +1,21 @@
+{
+ "text": "Who'd.",
+ "text_timing": {
+  "version": 1,
+  "origin": "first-audio-receipt",
+  "anchors": [
+   [
+    "Who'd.",
+    -0.100586958,
+    0.0
+   ]
+  ],
+  "words": [
+   [
+    "Who'd.",
+    0.119676953,
+    0.554
+   ]
+  ]
+ }
+}

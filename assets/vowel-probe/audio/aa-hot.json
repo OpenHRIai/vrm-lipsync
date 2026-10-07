@@ -1,0 +1,21 @@
+{
+ "text": "Hot.",
+ "text_timing": {
+  "version": 1,
+  "origin": "first-audio-receipt",
+  "anchors": [
+   [
+    "Hot.",
+    -0.103483917,
+    0.0
+   ]
+  ],
+  "words": [
+   [
+    "Hot.",
+    0.11920313,
+    0.554
+   ]
+  ]
+ }
+}

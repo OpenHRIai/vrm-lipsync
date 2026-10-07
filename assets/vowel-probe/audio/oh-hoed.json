@@ -1,0 +1,21 @@
+{
+ "text": "Hoed.",
+ "text_timing": {
+  "version": 1,
+  "origin": "first-audio-receipt",
+  "anchors": [
+   [
+    "Hoed.",
+    -0.123439625,
+    0.0
+   ]
+  ],
+  "words": [
+   [
+    "Hoed.",
+    0.119466963,
+    0.554
+   ]
+  ]
+ }
+}
