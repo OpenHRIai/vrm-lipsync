@@ -56,6 +56,15 @@ export function useLipsyncFeed(options: UseLipsyncFeedOptions = {}): LipsyncFeed
     ),
   );
 
+  // On barge-in the server discards the unplayed audio and its batches, but
+  // some may already be in flight; cutting stops the mouth with the voice.
+  // At a natural turn end the cut's grace window keeps everything still due,
+  // and if the bot only paused mid-turn the feed resumes on the next batch.
+  useRTVIClientEvent(
+    RTVIEvent.BotStoppedSpeaking,
+    useCallback(() => feed.cut(), [feed]),
+  );
+
   // A disconnect leaves the feed anchored to a dead utterance clock.
   useRTVIClientEvent(
     RTVIEvent.Disconnected,

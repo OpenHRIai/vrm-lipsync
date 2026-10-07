@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { LipsyncFeed } from "../feed";
+import { LipsyncFeed, REST_POSE } from "../feed";
+import { parseLipsyncData } from "../protocol";
 import { ArticulationSource, isLipsyncSource, type LipsyncSource } from "../source";
 import { DEFAULT_ANCHORS, ZERO_VISEMES, type VisemeWeights } from "../visemeMapper";
 
@@ -20,6 +21,8 @@ function feedHolding(vowel: keyof typeof DEFAULT_ANCHORS): LipsyncFeed {
       confidence: 0.9,
     })),
     events: [],
+    windowStart: null,
+    playoutShift: 0,
     lead: null,
     raw: null,
   });
@@ -91,6 +94,8 @@ describe("scheduling lead", () => {
         },
       ],
       events: [],
+      windowStart: null,
+      playoutShift: 0,
       lead,
       raw: null,
     };
@@ -120,6 +125,69 @@ describe("scheduling lead", () => {
   });
 });
 
+describe("version-2 batches", () => {
+  /** A one-keyframe batch for window [ws, ws+0.2), sent `lead` before it plays. */
+  function v2(ctx: string, ws: number, lead: number, kfOffset = ws + 0.05, t0 = 0) {
+    return parseLipsyncData({
+      type: "bot-tts-lipsync",
+      version: 2,
+      ctx,
+      t0,
+      ws,
+      lead,
+      kf: [[kfOffset, 0.9, 0.5, 0.05, 0.6, 0.5, 0.15]],
+      ev: [],
+    })!;
+  }
+
+  it("anchors on the window start, not the first keyframe", () => {
+    // The window opens at 1.0s but its first keyframe is at 1.05s; v1-style
+    // anchoring on the keyframe would place t=0 50ms late.
+    const feed = new LipsyncFeed();
+    feed.ingest(v2("u", 1.0, 0.2), 10_000);
+    expect(feed.relTime(10_000)).toBeCloseTo(0.8, 6);
+  });
+
+  it("accepts a negative lead from a turn that started behind playout", () => {
+    const feed = new LipsyncFeed();
+    feed.ingest(v2("u", 0, -0.05), 10_000);
+    // Window 0 began playing 50ms before the batch arrived.
+    expect(feed.relTime(10_000)).toBeCloseTo(0.05, 6);
+  });
+
+  it("re-anchors when a context restarts its offsets", () => {
+    const feed = new LipsyncFeed();
+    feed.ingest(v2("u", 2.0, 0.2), 10_000);
+    feed.ingest(v2("u", 0, 0.2), 20_000);
+    expect(feed.relTime(20_000)).toBeCloseTo(-0.2, 6);
+  });
+
+  it("ignores batches still in flight after a cut", () => {
+    const feed = new LipsyncFeed();
+    feed.ingest(v2("u", 0, 0.2), 10_000);
+    feed.cut(10_400); // playhead at 0.2s
+    feed.ingest(v2("u", 1.0, 0.2), 10_500);
+    expect(feed.sample(11_300).openness).toBeCloseTo(REST_POSE.openness, 1);
+    // A new utterance is unaffected.
+    feed.ingest(v2("next", 0, 0.2), 12_000);
+    expect(feed.sample(12_250).openness).toBeCloseTo(0.9, 6);
+  });
+
+  it("resumes an utterance that carries on after a stall", () => {
+    // Seen live: the LLM paused ~5s between sentences, the transport ran dry
+    // and the bot "stopped speaking", then the same TTS context resumed. The
+    // server shifts the resumed audio's playout by the stall (t0); treating
+    // the stop as a barge-in froze the mouth for the rest of the turn.
+    const feed = new LipsyncFeed();
+    feed.ingest(v2("turn", 0, 0.2), 10_000);
+    feed.cut(11_000); // bot-stopped-speaking during the stall
+    // Next sentence: audio offset 1.0s, playing 5s late.
+    feed.ingest(v2("turn", 1.0, 0.2, 1.05, 5.0), 16_000);
+    // Its keyframe sits at 1.05 + 5.0 = 6.05s of utterance time.
+    expect(feed.sample(10_200 + 6050).openness).toBeCloseTo(0.9, 6);
+  });
+});
+
 describe("consonant events must not swallow the utterance", () => {
   // LipsyncFeed.activeEvents applies a 250ms floor so UI badges flash long
   // enough to see. Driving the mouth from that floor held the lips shut for
@@ -140,6 +208,8 @@ describe("consonant events must not swallow the utterance", () => {
         confidence: 0.3,
       })),
       events: [{ offset: 0, kind: "closure", duration, confidence: 0.9 }],
+      windowStart: null,
+      playoutShift: 0,
       lead: null,
       raw: null,
     });
@@ -187,6 +257,8 @@ describe("the mouth closes promptly after speech ends", () => {
         confidence: 0.4,
       })),
       events: [],
+      windowStart: null,
+      playoutShift: 0,
       lead: 0,
       raw: null,
     });
@@ -237,6 +309,8 @@ describe("lookahead compensates the smoother's onset delay", () => {
         { offset: 1.5, openness: 0.95, width: 0.5, rounding: 0.05, energy: 0.9, pitch: 0.5, confidence: 0.4 },
       ],
       events: [],
+      windowStart: null,
+      playoutShift: 0,
       lead: 0,
       raw: null,
     });
@@ -285,6 +359,8 @@ describe("fast vowels reach their target opening", () => {
         { offset: 1.5, ...rest },
       ],
       events: [],
+      windowStart: null,
+      playoutShift: 0,
       lead: 0,
       raw: null,
     });

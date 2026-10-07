@@ -6,9 +6,14 @@
  * arrives as the `data` object passed to `onServerMessage`, with
  * `type: "bot-tts-lipsync"` as the demux discriminator (other server
  * messages are ignored by `parseLipsyncData`). Keyframes and events are
- * positional arrays for wire compaction, offsets are seconds from the first
- * audio of `ctx`, and `t0` is a base offset added to all offsets (0 in
- * version 1).
+ * positional arrays for wire compaction, offsets are seconds of audio from
+ * the first sample of `ctx`, and `t0` is a playout shift added to all
+ * offsets (nonzero only after the bot's audio stalled mid-utterance).
+ * Version 2 adds `ws`, the batch's window start, and `lead`, how far ahead
+ * of that window's playout the server sent the message: audio offset
+ * `ws + t0` plays `lead` seconds after arrival, less network transit, which
+ * is what the feed anchors on. Events may precede a batch's window (a
+ * closure is confirmed only once speech resumes after it).
  */
 
 export const LIPSYNC_MESSAGE_TYPE = "bot-tts-lipsync";
@@ -23,6 +28,10 @@ export interface LipsyncKeyframe {
   rounding: number;
   energy: number;
   pitch: number;
+  /**
+   * Per-hop estimation evidence (0..1). Diagnostic only: it tracks loudness
+   * on real speech (mean ~0.15), so it must not scale the pose or its opacity.
+   */
   confidence: number;
 }
 
@@ -39,10 +48,23 @@ export interface LipsyncBatch {
   keyframes: LipsyncKeyframe[];
   events: LipsyncEvent[];
   /**
-   * Seconds ahead of playout this batch was released, when the server states
-   * it. The lead is the server's own setting (`scheduling_lead_ms`), so a
-   * server that declares it lets the client stay in sync without being
-   * configured to match. `null` when absent — see `LipsyncFeed`.
+   * Window start in seconds from the utterance's first audio (t0 applied).
+   * Version 2; `null` from older servers.
+   */
+  windowStart: number | null;
+  /**
+   * The wire's `t0`, already added to every offset above: how much later
+   * than its audio offset this batch plays, because the bot's audio stalled
+   * earlier in the utterance (e.g. the LLM paused between sentences). It only
+   * ever grows within an utterance, so a larger value marks audio that
+   * resumed after a stall.
+   */
+  playoutShift: number;
+  /**
+   * Seconds until the window starts playing, measured when the server sent
+   * the batch — negative when analysis is behind playout, as at the start of
+   * a turn. Version 2; `null` from older servers, which leave the feed to
+   * assume `scheduling_lead_ms`.
    */
   lead: number | null;
   /** Original message data, for the raw inspector. */
@@ -62,6 +84,8 @@ export function parseLipsyncData(data: unknown): LipsyncBatch | null {
   return {
     version: typeof d.version === "number" ? d.version : 1,
     ctx: typeof d.ctx === "string" ? d.ctx : null,
+    windowStart: typeof d.ws === "number" ? t0 + d.ws : null,
+    playoutShift: t0,
     lead: typeof d.lead === "number" ? d.lead : null,
     keyframes: kf.map(
       ([offset, openness, width, rounding, energy, pitch, confidence]) => ({

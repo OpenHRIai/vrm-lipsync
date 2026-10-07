@@ -67,7 +67,7 @@ function makeBatch(
       events.push({ offset: t, kind: "closure", duration: 0.1, confidence: 0.8 });
     }
   }
-  return { version: 1, ctx, keyframes: kf, events, lead: null, raw: null };
+  return { version: 1, ctx, keyframes: kf, events, windowStart: null, playoutShift: 0, lead: null, raw: null };
 }
 
 const btn: React.CSSProperties = {

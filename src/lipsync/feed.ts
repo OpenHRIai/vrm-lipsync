@@ -9,10 +9,10 @@ import type {
  * Fallback for how far ahead of playout the server releases each batch,
  * matching `LipsyncParams.scheduling_lead_ms`'s default of 200ms.
  *
- * Only a fallback: the lead is the *server's* setting, and a server that
- * tunes it would silently desync a client hardcoded to this value. Prefer a
- * server that states its lead on the wire (see `LipsyncBatch.lead`); failing
- * that, pass the matching value to the `LipsyncFeed` constructor.
+ * Only for version-1 servers. A version-2 batch carries the lead actually
+ * remaining for its window (see `LipsyncBatch.lead`), which is exact; this
+ * assumed value never was for the first batch of a turn. Failing both, pass
+ * the server's value to the `LipsyncFeed` constructor.
  */
 export const SCHEDULING_LEAD_SEC = 0.2;
 
@@ -39,6 +39,14 @@ const REST_EASE_SEC = 0.1;
 const PREROLL_SEC = 0.2; // blend rest -> first keyframe over this window
 const PRUNE_HORIZON_SEC = 30; // drop keyframes this far behind the playhead
 const RATE_WINDOW_MS = 5000; // sliding window for msg/s + kf/s rates
+/**
+ * Motion kept past the playhead by `cut()`. Covers the client's own audio
+ * latency, and must stay above the server's `_UTTERANCE_CLOSE_SEC` (0.1s):
+ * the rest keyframe that closes the mouth sits that far past the last
+ * analyzed hop, so a shorter grace would discard it at a natural turn end and
+ * leave the mouth open through the ease to rest.
+ */
+const CUT_GRACE_SEC = 0.15;
 /**
  * Display floor: how long a zero-duration event stays "active" for UI purposes,
  * so badges and timelines flash long enough to see.
@@ -102,15 +110,6 @@ function lerpPose(
   };
 }
 
-/**
- * Buffers lipsync batches and plays them back on a wall-clock timeline.
- *
- * Keyframe offsets are utterance-relative, and the server releases each batch
- * a known lead ahead of its audio, so a batch's arrival time implies
- * where the utterance's t=0 sits on the wall clock ("anchor"). Batches are
- * stored in offset space; `sample()` maps the wall clock through the anchor
- * and interpolates between the bracketing keyframes.
- */
 export interface LipsyncFeedOptions {
   /**
    * Assumed release lead in seconds, used only for servers that do not state
@@ -123,6 +122,16 @@ export interface LipsyncFeedOptions {
   restEaseSec?: number;
 }
 
+/**
+ * Buffers lipsync batches and plays them back on a wall-clock timeline.
+ *
+ * Keyframe offsets are utterance-relative, and each batch says how far ahead
+ * of its window's playout it was sent, so a batch's arrival time implies
+ * where the utterance's t=0 sits on the wall clock ("anchor"), exact but for
+ * network transit. Batches are stored in offset space; `sample()` maps the
+ * wall clock through the anchor and interpolates between the bracketing
+ * keyframes.
+ */
 export class LipsyncFeed {
   /**
    * User-adjustable A/V trim in ms (positive delays the mouth).
@@ -140,6 +149,11 @@ export class LipsyncFeed {
   private kfs: LipsyncKeyframe[] = [];
   private evs: LipsyncEvent[] = [];
   private cursor = 0;
+  private maxProgress = -Infinity;
+  private cutCtx: string | null = null;
+  private cutProgress = Infinity;
+  private cutShift = 0;
+  private lastShift = 0;
   private msgTimes: number[] = [];
   private kfTimes: number[] = [];
   private totalMessages = 0;
@@ -162,31 +176,59 @@ export class LipsyncFeed {
     return performance.now();
   }
 
-  ingest(batch: LipsyncBatch): void {
-    const now = this.now();
+  /**
+   * Adds a batch that arrived at `now` (defaults to the current time; a
+   * replay passes the recorded arrival time).
+   */
+  ingest(batch: LipsyncBatch, now: number = this.now()): void {
     const first = batch.keyframes[0]?.offset ?? batch.events[0]?.offset;
     if (first === undefined) return;
 
-    // A server that declares its own lead wins: it knows the value, and a
-    // batch-by-batch reading survives the server being reconfigured mid-run.
+    // Where the utterance's t=0 sits on the wall clock, as this batch implies
+    // it. A version-2 batch says how far ahead of its window's playout it was
+    // sent, so the estimate is the truth plus this batch's transit delay.
+    // Otherwise the batch is assumed to have arrived a fixed lead before its
+    // first keyframe, which the first batch of a turn never did.
+    const exact = batch.windowStart !== null && batch.lead !== null;
+    const progress = exact ? batch.windowStart! : first;
     const leadSec = batch.lead ?? this.schedulingLeadSec;
-    const impliedAnchor = now + leadSec * 1000 - first * 1000;
+    const impliedAnchor = now + leadSec * 1000 - progress * 1000;
+    // Windows within one utterance only ever advance (events may precede a
+    // window, so key on the window start, not the first offset). A regression
+    // means the server reopened the same TTS context id (offsets restart at
+    // 0): treat it as a new utterance.
+    const restarted = progress < this.maxProgress - 1e-3;
+    if (batch.ctx === this.cutCtx && !restarted) {
+      if (batch.playoutShift > this.cutShift + 1e-3) {
+        // The audio resumed after a stall, so the cut was a pause, not a
+        // barge-in: the bot stops speaking whenever the transport runs dry,
+        // and the server keeps the same context going after it.
+        this.cutCtx = null;
+      } else if (progress >= this.cutProgress) {
+        // Still in flight when the utterance was cut: stale.
+        return;
+      }
+    }
     let anchor = this.anchorMs;
-    if (batch.ctx !== this.ctx || anchor === null) {
+    if (batch.ctx !== this.ctx || anchor === null || restarted) {
       // New utterance (or first ever): drop the old queue and re-anchor.
       this.ctx = batch.ctx;
+      this.cutCtx = null;
       anchor = impliedAnchor;
       this.kfs = [];
       this.evs = [];
       this.cursor = 0;
+      this.maxProgress = -Infinity;
     } else if (impliedAnchor < anchor - 1) {
-      // A batch arriving with more lead implies an earlier true anchor;
-      // late batches (network jitter, pts clamping) never move it.
+      // Every estimate is the truth plus that batch's transit delay, so the
+      // earliest one seen is the best; later or slower batches never move it.
       if (anchor - impliedAnchor > 120) this.resyncs++;
       anchor = impliedAnchor;
     }
     this.anchorMs = anchor;
-    this.lastLeadMs = anchor + first * 1000 - now;
+    this.maxProgress = Math.max(this.maxProgress, progress);
+    this.lastShift = batch.playoutShift;
+    this.lastLeadMs = anchor + progress * 1000 - now;
 
     this.kfs.push(...batch.keyframes);
     for (const e of batch.events) {
@@ -210,6 +252,34 @@ export class LipsyncFeed {
     this.prune();
 
     this.lastBatch = batch;
+    this.notify();
+  }
+
+  /**
+   * Stops the utterance at the playhead, e.g. on barge-in, when the server
+   * has discarded the rest of the audio and its batches: keyframes and events
+   * beyond a short grace window are dropped, so the pose holds briefly and
+   * eases to rest as it does after an utterance's last keyframe, and batches
+   * of this utterance still in flight are ignored when they arrive. The grace
+   * covers the client's own audio latency, so a cut at a natural turn end
+   * (the bot-stopped-speaking event fires as the last audio leaves the
+   * server) loses nothing.
+   *
+   * A cut is undone if the same utterance carries on after a stall — the
+   * bot also stops speaking when its LLM pauses mid-turn, and a version-2
+   * server marks the resumed audio with a larger `playoutShift`. Without
+   * that, the mouth would freeze for the rest of the turn.
+   */
+  cut(nowMs: number = this.now()): void {
+    const rel = this.relTime(nowMs);
+    if (rel === null) return;
+    const keep = rel + CUT_GRACE_SEC;
+    this.kfs = this.kfs.filter((k) => k.offset <= keep);
+    this.evs = this.evs.filter((e) => e.offset <= keep);
+    this.cursor = Math.min(this.cursor, Math.max(0, this.kfs.length - 1));
+    this.cutCtx = this.ctx;
+    this.cutProgress = keep;
+    this.cutShift = this.lastShift;
     this.notify();
   }
 
@@ -307,9 +377,24 @@ export class LipsyncFeed {
     this.kfs = [];
     this.evs = [];
     this.cursor = 0;
+    this.maxProgress = -Infinity;
+    this.cutCtx = null;
+    this.lastShift = 0;
     this.lastLeadMs = null;
     this.lastBatch = null;
     this.notify();
+  }
+
+  /** Like reset(), but also forgets the event log and counters: a fresh feed. */
+  clear(): void {
+    this.eventLog = [];
+    this.msgTimes = [];
+    this.kfTimes = [];
+    this.totalMessages = 0;
+    this.totalKeyframes = 0;
+    this.totalEvents = 0;
+    this.resyncs = 0;
+    this.reset();
   }
 
   private prune(): void {
