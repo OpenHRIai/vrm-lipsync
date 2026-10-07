@@ -69,9 +69,14 @@ function Avatar({ feed }: { feed: LipsyncFeed }) {
       idleAnimationUrl="/idle_loop.vrma"
       source={feed}
       interactive
-      className="flex-1 min-h-0"
+      // Inline rather than Tailwind classes: this app has no Tailwind build of
+      // its own, only voice-ui-kit's prebuilt stylesheet, which lacks
+      // `min-h-0` and `place-items-center`. Without a zero min-height the
+      // canvas cannot shrink, and on a short window it pushes the controls,
+      // Connect included, off the bottom of the page.
+      style={{ flex: 1, minHeight: 0 }}
       fallback={
-        <div className="absolute inset-0 grid place-items-center">
+        <div className="absolute inset-0 grid" style={{ placeItems: "center" }}>
           <SpinLoader />
         </div>
       }
