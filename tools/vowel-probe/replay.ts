@@ -7,8 +7,8 @@
  * cannot disagree about what a probe rendered as.
  */
 import { LipsyncFeed } from "../../src/lipsync/feed";
-import { parseLipsyncData } from "../../src/lipsync/protocol";
-import { ArticulationSource } from "../../src/lipsync/source";
+import { parseLipsyncData, type LipsyncEventKind } from "../../src/lipsync/protocol";
+import { ArticulationSource, DEFAULT_EVENT_HOLD_SEC } from "../../src/lipsync/source";
 import {
   DEFAULT_MAPPER_CONFIG,
   ZERO_VISEMES,
@@ -87,9 +87,13 @@ export class ReplayFeed extends LipsyncFeed {
 
 export interface ReplayFrame {
   rel: number;
+  /** The analyzer's articulation as the feed interpolates it, before mapping. */
   openness: number;
   width: number;
   rounding: number;
+  /** Consonant events in force, as the renderer applies them (lips shut). */
+  events: LipsyncEventKind[];
+  /** VRM blendshape weights after mapping and smoothing. */
   weights: VisemeWeights;
 }
 
@@ -109,6 +113,7 @@ export function replay(probe: Probe): ReplayFrame[] {
       openness: s.openness,
       width: s.width,
       rounding: s.rounding,
+      events: [...feed.activeEventKinds(nowMs, DEFAULT_EVENT_HOLD_SEC)],
       weights: { ...source.sampleVisemes(nowMs, FRAME_SEC) },
     });
   }

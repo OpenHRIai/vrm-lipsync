@@ -1,4 +1,5 @@
 import {
+  DEFAULT_ANCHORS,
   VRMAvatar,
   ZERO_VISEMES,
   type LipsyncSource,
@@ -28,6 +29,11 @@ import {
  * vowel that *should* be showing. The right-hand avatar is driven by the very
  * frames `npm run test:vowels` scores, so what you see is what the test
  * judged. Vowels last 100-200ms; slow it down and scrub to actually look.
+ *
+ * Between them, a plain 2D mouth draws the analyzer's own output (openness,
+ * width, rounding) before any VRM mapping or smoothing, with the expected
+ * vowel's target pose dashed behind it — so a wrong shape can be pinned on
+ * the analyzer or on what the VRM layer does with it.
  */
 
 const MODEL_URL = "/RikiMinami.vrm";
@@ -89,6 +95,80 @@ function Badge({ ok, label }: { ok: boolean; label: string }) {
       {label[0]}
       {ok ? "✓" : "✗"}
     </span>
+  );
+}
+
+/**
+ * Mouth outline for one articulation pose, after the reference client in
+ * pipecat-visemes (client/src/components/Mouth.tsx): openness sets the
+ * vertical aperture, width spreads the corners, rounding puckers (narrower,
+ * taller, rounder).
+ */
+function mouthGeometry(openness: number, width: number, rounding: number) {
+  const cx = 200;
+  const cy = 130;
+  const halfW = (44 + 62 * width) * (1 - 0.42 * rounding);
+  const h = (6 + 118 * openness) * (1 + 0.32 * rounding);
+  const yCorner = cy - Math.max(0, width - 0.4) * 14;
+  const cxOff = halfW * 0.52;
+  const yTop = cy - h * 0.54;
+  const yBot = cy + h * 0.66;
+  const [xL, xR] = [cx - halfW, cx + halfW];
+  const f = (n: number) => n.toFixed(1);
+  const path =
+    `M ${f(xL)} ${f(yCorner)} ` +
+    `C ${f(cx - cxOff)} ${f(yTop)}, ${f(cx + cxOff)} ${f(yTop)}, ${f(xR)} ${f(yCorner)} ` +
+    `C ${f(cx + cxOff)} ${f(yBot)}, ${f(cx - cxOff)} ${f(yBot)}, ${f(xL)} ${f(yCorner)} Z`;
+  return { path, cx, cy, halfW, h, yTop };
+}
+
+function AnalyzerMouth({ frame, expect }: { frame: ReplayFrame | null; expect: Viseme | null }) {
+  // Before any frame: the client's rest pose.
+  const pose: Pick<ReplayFrame, "openness" | "width" | "rounding" | "events"> = frame ?? {
+    openness: 0.15,
+    width: 0.35,
+    rounding: 0.1,
+    events: [],
+  };
+  const g = mouthGeometry(pose.openness, pose.width, pose.rounding);
+  const target = expect ? DEFAULT_ANCHORS[expect] : null;
+  const t = target && mouthGeometry(target.openness, target.width, target.rounding);
+  const shut = pose.events.some((e) => e === "closure" || e === "nasal");
+  return (
+    <div style={{ position: "relative", minHeight: 0, display: "grid", placeItems: "center" }}>
+      <svg viewBox="0 0 400 260" style={{ width: "92%", maxHeight: "70%" }}>
+        <defs>
+          <clipPath id="analyzer-mouth">
+            <path d={g.path} />
+          </clipPath>
+        </defs>
+        <path d={g.path} fill="#4a1520" />
+        <g clipPath="url(#analyzer-mouth)">
+          {g.h > 26 && pose.rounding < 0.55 && (
+            <rect x={g.cx - g.halfW * 0.78} y={g.yTop + 2} width={g.halfW * 1.56} height={Math.min(16, g.h * 0.3)} rx={3} fill="#f1efe8" opacity={0.9} />
+          )}
+          {g.h > 42 && <ellipse cx={g.cx} cy={g.cy + g.h * 0.34} rx={g.halfW * 0.58} ry={g.h * 0.26} fill="#c2566a" opacity={0.85} />}
+        </g>
+        <path
+          d={g.path}
+          fill="none"
+          stroke="#e07a8a"
+          strokeWidth={9.5 - 3 * pose.openness + 3 * pose.rounding}
+          strokeLinejoin="round"
+        />
+        {/* On top, so a small target (a puckered /u/) is not hidden by the mouth. */}
+        {t && <path d={t.path} fill="none" stroke="#60a5fa" strokeWidth={2.5} strokeDasharray="7 5" />}
+      </svg>
+      <div style={{ position: "absolute", bottom: 10, left: 0, right: 0, textAlign: "center", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+        open {pose.openness.toFixed(2)} · width {pose.width.toFixed(2)} · round {pose.rounding.toFixed(2)}
+        {shut && (
+          <span style={{ marginLeft: 8, padding: "1px 6px", borderRadius: 4, background: "#7c2d12", color: "#fed7aa" }}>
+            {pose.events.includes("nasal") ? "NASAL" : "CLOSURE"}: VRM lips shut
+          </span>
+        )}
+        {t && <div style={{ opacity: 0.6, marginTop: 2 }}>dashed: {expect} target pose</div>}
+      </div>
+    </div>
   );
 }
 
@@ -236,6 +316,11 @@ function App() {
   };
 
   const shown = useMemo(() => frameAt(current?.frames ?? [], t), [current, t]);
+  const rawFrame = useMemo(() => {
+    const frames = current?.frames ?? [];
+    if (frames.length === 0) return null;
+    return frames[Math.min(frames.length - 1, Math.max(0, Math.round(t / FRAME_SEC)))];
+  }, [current, t]);
   const activeSegment =
     current?.probe.segments.find((s) => t >= s.start - REF_RAMP_SEC && t <= s.end + REF_RAMP_SEC) ??
     (current?.probe.segments.length === 1 ? current.probe.segments[0] : null);
@@ -270,32 +355,46 @@ function App() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", minHeight: 0 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", minHeight: 0 }}>
         {[
           {
+            key: "reference",
             title: "Should show",
             sub: activeSegment ? `${activeSegment.expect} — ${SOUNDS[activeSegment.expect]}` : "rest",
-            source: referenceSource,
+            source: referenceSource as LipsyncSource | null,
           },
           {
+            key: "analyzer",
+            title: "Analyzer output (no VRM)",
+            sub: "what the server sent, before mapping and smoothing",
+            source: null,
+          },
+          {
+            key: "pipeline",
             title: "Pipeline renders",
             sub: "TTS audio → analyzer → feed → mapper → smoother",
-            source: pipelineSource,
+            source: pipelineSource as LipsyncSource | null,
           },
         ].map((pane) => (
-          <div key={pane.title} style={{ position: "relative", minHeight: 0, borderRight: "1px solid #2a2e35" }}>
-            <VRMAvatar
-              modelUrl={MODEL_URL}
-              idleAnimationUrl="/idle_loop.vrma"
-              source={pane.source}
-              interactive
-              style={{ position: "absolute", inset: 0 }}
-              fallback={
-                <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
-                  loading model…
-                </div>
-              }
-            />
+          <div key={pane.key} style={{ position: "relative", minHeight: 0, borderRight: "1px solid #2a2e35" }}>
+            {pane.source ? (
+              <VRMAvatar
+                modelUrl={MODEL_URL}
+                idleAnimationUrl="/idle_loop.vrma"
+                source={pane.source}
+                interactive
+                style={{ position: "absolute", inset: 0 }}
+                fallback={
+                  <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
+                    loading model…
+                  </div>
+                }
+              />
+            ) : (
+              <div style={{ position: "absolute", inset: 0, display: "grid" }}>
+                <AnalyzerMouth frame={rawFrame} expect={activeSegment?.expect ?? null} />
+              </div>
+            )}
             <div style={{ position: "absolute", top: 8, left: 12, pointerEvents: "none" }}>
               <div style={{ fontWeight: 600 }}>{pane.title}</div>
               <div style={{ fontSize: 12, opacity: 0.7 }}>{pane.sub}</div>
