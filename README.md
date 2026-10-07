@@ -126,13 +126,11 @@ the signal stays smooth instead of snapping between discrete mouth shapes.
 | `ee`   | /e/   | 0.50     | 0.90  | 0.05     |
 | `oh`   | /o/   | 0.75     | 0.25  | 0.75     |
 
-Three things ride on top:
+Two things ride on top:
 
 - **Events override the vowels.** A `closure` (M/B/P) or `nasal` (m/n) shuts
   the lips regardless of the vowel tract, and closes them faster than an
   ordinary release. This is what stops the avatar humming with its mouth open.
-- **Confidence gates commitment.** Low-confidence frames pull toward a less
-  articulated mouth rather than confidently rendering a guess.
 - **Distance from rest sets the strength.** Blend weights are normalised, so a
   separate term is what actually returns the face to rest. It is deliberately
   *not* jaw opening: /i/ and /u/ are close vowels shaped by the lips with the
@@ -144,12 +142,11 @@ Three things ride on top:
 ### Calibration
 
 The defaults are tuned against a real utterance rather than idealised values,
-which matters more than it sounds. The analyzer's `confidence` is a composite
-that penalises ordinary formant ambiguity: measured over live speech it ran a
-median of **0.07** and never exceeded **0.5**, nothing like the ~0.9 that
-hand-written fixtures assume. Reading it as a plain 0..1 gain scales the whole
-mouth down to a fraction of its range, so it is normalised against
-`confidenceRef` instead.
+which matters more than it sounds. The analyzer's `confidence` is ignored by
+default: the server documents it as a per-hop diagnostic that on real speech
+mostly tracks loudness (mean ~0.15), so fading the mouth by it fades quiet
+syllables rather than doubtful ones. `minCommit` below 1 opts back in, with
+`confidenceRef` as the value treated as fully certain.
 
 Consonant events are held for `eventHoldSec` (50ms) rather than the feed's
 250ms *display* floor, which exists so UI badges flash long enough to see.
@@ -157,12 +154,15 @@ Driving the lips from that floor keeps them shut for about two-thirds of
 running speech.
 
 If the mouth reads as trailing the audio, the first knob is `lookaheadSec`
-(20ms by default). Smoothing reaches a small target immediately but takes
+(off by default). Smoothing reaches a small target immediately but takes
 several time constants to reach a large one, so wide openings lag even when
-average alignment is within a frame; sampling that far ahead cancels it at no
-cost in smoothness. Residual A/V skew — jitter buffers, displays, personal
-taste — belongs in `offsetTrimMs` instead, where negative moves the mouth
-earlier.
+average alignment is within a frame; ~20ms of lookahead cancels that against
+the keyframe timeline. It is off because a WebRTC audio track is
+jitter-buffered while data-channel messages are not, so end to end the sound
+already lands after its keyframes — measured, 20ms put the mouth ~30ms early,
+and early reads worse than late. Residual A/V skew — jitter buffers,
+displays, personal taste — belongs in `offsetTrimMs`, where negative moves
+the mouth earlier.
 
 How fast the mouth shuts after a sentence is governed by the feed, not the
 smoother — the last pose is held for `restHoldSec` and then eased to rest over
@@ -192,15 +192,19 @@ between rigs:
 
 ## Sync and the scheduling lead
 
-The server releases each batch a fixed time *ahead* of the matching audio
-(`scheduling_lead_ms`, 200 ms by default), and the client uses that to work out
-where the utterance's t=0 sits on the wall clock. Get it wrong and the mouth is
-consistently early or late.
+The server releases each batch ahead of the matching audio, and the client
+uses that to work out where the utterance's t=0 sits on the wall clock. Get it
+wrong and the mouth is consistently early or late.
 
-The lead belongs to the server, so the right place for it is the wire: if a
-batch carries a `lead` field (in seconds) it is used directly, per batch, and
-nothing needs configuring. Otherwise the client assumes 200 ms — override that
-only if your server tunes `scheduling_lead_ms` and does not report it:
+Version-2 servers put the timing on the wire: each batch carries its window
+start (`ws`) and the lead actually remaining when it was sent (`lead`, which
+is negative when analysis started behind playout, as at the top of a turn).
+The anchor is then exact but for network transit, and the feed keeps the
+earliest estimate it sees. Nothing needs configuring.
+
+Version-1 servers state neither, so the client assumes each batch arrived
+`scheduling_lead_ms` (200 ms by default) before its first keyframe. Override
+that only if such a server tunes it:
 
 ```tsx
 const feed = useLipsyncFeed({ schedulingLeadSec: 0.35 });
@@ -208,6 +212,40 @@ const feed = useLipsyncFeed({ schedulingLeadSec: 0.35 });
 
 `offsetTrimMs` is a separate knob: the lead is a fact about the server, the
 trim is a human nudge for jitter-buffer skew and taste.
+
+On barge-in the server discards the unplayed audio and its batches, but some
+may already be in flight. `useLipsyncFeed` calls `feed.cut()` when the bot
+stops speaking, which drops everything past a short grace window and ignores
+stragglers from that utterance, so the mouth stops with the voice. The bot
+also "stops speaking" when its LLM pauses mid-turn and the audio runs dry;
+the server then continues the same utterance with its playout shifted by the
+pause (`t0`), and the feed takes that as the cut being a pause and resumes.
+Call `cut()` yourself if you drive the feed headless.
+
+## Checking vowels against real speech
+
+Unit tests with hand-written poses prove the mapper is self-consistent, not
+that the avatar says "ee" when the bot does. `npm run test:vowels` replays
+vowels spoken by the bot's own TTS voice, analyzed by the real server
+analyzer, through the real client path, and checks two things for each:
+
+- **analyzer** — the pose the server sent sits nearest the right vowel;
+- **avatar** — the blendshape the renderer applied is that vowel, visibly.
+
+A failure in the first layer is the analyzer's; no client tuning will fix it.
+Each failure prints the analyzer's formants beside Praat's measurement of the
+same audio, so a mistracked formant is told apart from a voice whose vowels
+genuinely sit elsewhere.
+
+To see and hear the same clips, run example 01 and open `/probe.html`: the
+left avatar holds the vowel that should show, the right one plays what the
+pipeline rendered, with slow motion and a scrubber.
+
+The fixtures live in `assets/vowel-probe/` and are re-captured with
+`tools/vowel-probe/capture.py`. The audio is committed, so re-running it on
+an analyzer change needs no API keys, and `--out` with `VOWEL_PROBES` scores
+a candidate analyzer without replacing the baseline. The suite is kept out of
+`npm test` while the analyzer still fails part of it.
 
 ## Compressed models
 
