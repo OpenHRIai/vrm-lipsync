@@ -86,9 +86,18 @@ describe("mapToVisemes", () => {
     expect(sum(mapToVisemes(sample({ ...DEFAULT_ANCHORS.aa, live: false })))).toBe(0);
   });
 
-  it("commits less when the analyzer is unconfident", () => {
+  it("ignores confidence by default", () => {
+    // The server's confidence tracks loudness, not doubt; fading by it fades
+    // quiet syllables.
     const confident = mapToVisemes(sample({ ...DEFAULT_ANCHORS.aa, confidence: 1 }));
     const unsure = mapToVisemes(sample({ ...DEFAULT_ANCHORS.aa, confidence: 0 }));
+    expect(sum(unsure)).toBeCloseTo(sum(confident), 10);
+  });
+
+  it("commits less when unconfident if minCommit opts in", () => {
+    const cfg = { minCommit: 0.75 };
+    const confident = mapToVisemes(sample({ ...DEFAULT_ANCHORS.aa, confidence: 1 }), [], cfg);
+    const unsure = mapToVisemes(sample({ ...DEFAULT_ANCHORS.aa, confidence: 0 }), [], cfg);
     expect(sum(unsure)).toBeLessThan(sum(confident));
     // ...but still moves, rather than freezing the face mid-utterance.
     expect(sum(unsure)).toBeGreaterThan(0);
@@ -175,11 +184,15 @@ describe("calibration against real analyzer output", () => {
     expect(sum(mapToVisemes(s))).toBeGreaterThan(0.75);
   });
 
-  it("keeps confidence discriminating across its real range", () => {
+  it("keeps confidence discriminating across its real range when opted in", () => {
     const at = (confidence: number) =>
-      sum(mapToVisemes(sample({ openness: 0.5, width: 0.5, rounding: 0.4, confidence })));
+      sum(
+        mapToVisemes(sample({ openness: 0.5, width: 0.5, rounding: 0.4, confidence }), [], {
+          minCommit: 0.75,
+        }),
+      );
     // Spanning the observed median to the observed maximum must produce a
-    // visible difference, or confidence has stopped meaning anything.
+    // visible difference, or the opt-in has stopped meaning anything.
     expect(at(0.5) - at(REAL_CONFIDENCE_MEDIAN)).toBeGreaterThan(0.1);
   });
 });

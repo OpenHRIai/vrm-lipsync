@@ -83,22 +83,19 @@ export interface VisemeMapperConfig {
   /** Overall scale on the final weights; trims models with strong blendshapes. */
   gain: number;
   /**
-   * Floor on how much of the mapped shape survives at zero confidence. At 0
-   * an unconfident frame collapses to a closed mouth; at 1 confidence is
-   * ignored. The server's contract is "uncertain -> neutral", so we keep a
-   * little movement rather than freezing the face mid-utterance.
+   * Floor on how much of the mapped shape survives at zero confidence. At 1
+   * (the default) confidence is ignored; lower values fade the mouth on
+   * unconfident frames.
+   *
+   * Off by default because the server says so: its `confidence` is a
+   * per-hop diagnostic that on real speech mostly tracks loudness (mean
+   * ~0.15), so fading by it fades quiet syllables rather than doubtful ones.
    */
   minCommit: number;
   /**
-   * Confidence treated as fully certain.
-   *
-   * The analyzer's confidence is not distributed over 0..1: measured across a
-   * real utterance it runs a median of 0.07 and never exceeded 0.5, because
-   * it is a composite that penalises ordinary formant ambiguity. Reading it
-   * as a 0..1 gain therefore scales the whole mouth down to a fraction of its
-   * intended range. Normalising against a realistic ceiling keeps confidence
-   * discriminating between clear and unclear frames without flattening
-   * everything.
+   * Confidence treated as fully certain, when `minCommit` < 1. The analyzer
+   * never reports anything near 1 on real speech, so reading it as a plain
+   * 0..1 gain would scale the whole mouth down.
    */
   confidenceRef: number;
 }
@@ -109,7 +106,7 @@ export const DEFAULT_MAPPER_CONFIG: VisemeMapperConfig = {
   axisWeights: { openness: 1, width: 0.7, rounding: 1.1 },
   activationDistance: 0.5,
   gain: 1,
-  minCommit: 0.75,
+  minCommit: 1,
   confidenceRef: 0.35,
 };
 
@@ -203,9 +200,8 @@ export function mapToVisemes(
 }
 
 /**
- * How far to commit to the mapped shape given the analyzer's confidence.
- * Low-confidence frames pull toward a neutral, less articulated mouth rather
- * than confidently rendering a guess.
+ * How far to commit to the mapped shape given the analyzer's confidence; 1
+ * unless `minCommit` opts in to fading unconfident frames.
  */
 function commitOf(sample: ArticulationSample, cfg: VisemeMapperConfig): number {
   const normalized = clamp01(sample.confidence / Math.max(cfg.confidenceRef, 1e-6));
