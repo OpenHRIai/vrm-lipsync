@@ -1,9 +1,12 @@
 # Bot server
 
 This example needs a Pipecat bot with the lipsync processor in its pipeline.
-That server lives in the [`pipecat-visemes`](https://github.com/jptaylor/pipecat-visemes)
-project and is **not vendored here** — run it from upstream so you always get
-the analyzer the wire format was designed around.
+That server lives in the `pipecat-visemes` project and is **not vendored
+here**. `setup.sh` clones [our fork](https://github.com/maxipesfix/pipecat-visemes)
+of [upstream](https://github.com/jptaylor/pipecat-visemes): upstream plus
+analyzer fixes measured with its seven-voice accuracy benchmark, and the
+text-informed tier switched on in `bot.py`, which keeps close vowels such as
+"ee" and "oo" from reading as nasal murmurs that shut the mouth.
 
 ```bash
 ./setup.sh        # clones pipecat-visemes into ./vendor and installs it

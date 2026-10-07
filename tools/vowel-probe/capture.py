@@ -24,7 +24,8 @@ checkout's server/ directory instead and pass --out to keep the committed
 fixtures: `--out probes.next.json`, then `VOWEL_PROBES=probes.next.json npm
 run test:vowels`. `--text-events` turns on the analyzer's opt-in
 text-informed tier, fed the word timings recorded at synthesis exactly as
-upstream's benchmark replays them.
+upstream's benchmark replays them. The bot runs with it on, so the committed
+fixtures are captured with it too.
 
 The audio is committed, so re-running only re-analyzes it and needs no API
 key — that is the loop for testing an analyzer change. Changing a probe's text

@@ -6,7 +6,10 @@
 # defines.
 set -euo pipefail
 
-REPO="https://github.com/jptaylor/pipecat-visemes.git"
+# Our fork of jptaylor/pipecat-visemes: upstream plus analyzer fixes measured
+# with its accuracy benchmark (close vowels no longer read as nasal murmurs,
+# vowel-identity scoring) and the text-informed tier enabled in bot.py.
+REPO="https://github.com/maxipesfix/pipecat-visemes.git"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vendor"
 
 if ! command -v uv >/dev/null 2>&1; then
@@ -16,7 +19,9 @@ fi
 
 if [ -d "$DIR/.git" ]; then
   echo "==> Updating $DIR"
-  git -C "$DIR" pull --ff-only
+  # Clones made before the switch to the fork still point at upstream.
+  git -C "$DIR" remote set-url origin "$REPO"
+  git -C "$DIR" pull --ff-only origin main
 else
   echo "==> Cloning $REPO"
   git clone --depth 1 "$REPO" "$DIR"

@@ -104,7 +104,7 @@ describe("scheduling lead", () => {
   it("defaults to the server's documented 200ms lead", () => {
     const feed = new LipsyncFeed();
     const now = feed.now();
-    feed.ingest(batchAt(0, null));
+    feed.ingest(batchAt(0, null), now);
     // Anchor sits 200ms ahead, so the playhead is 200ms before t=0.
     expect(feed.relTime(now)! * 1000).toBeCloseTo(-200, 0);
   });
@@ -112,7 +112,7 @@ describe("scheduling lead", () => {
   it("honours a configured lead when the server does not state one", () => {
     const feed = new LipsyncFeed({ schedulingLeadSec: 0.5 });
     const now = feed.now();
-    feed.ingest(batchAt(0, null));
+    feed.ingest(batchAt(0, null), now);
     expect(feed.relTime(now)! * 1000).toBeCloseTo(-500, 0);
   });
 
@@ -120,7 +120,7 @@ describe("scheduling lead", () => {
     // The server knows its own setting; a stale client config must not win.
     const feed = new LipsyncFeed({ schedulingLeadSec: 0.5 });
     const now = feed.now();
-    feed.ingest(batchAt(0, 0.35));
+    feed.ingest(batchAt(0, 0.35), now);
     expect(feed.relTime(now)! * 1000).toBeCloseTo(-350, 0);
   });
 });
