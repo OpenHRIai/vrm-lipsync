@@ -5,9 +5,10 @@ October 2026. This covers work in two repositories:
 - **[OpenHRIai/vrm-lipsync](https://github.com/OpenHRIai/vrm-lipsync)**: the client (VRM avatar, feed, mapper) and the examples.
 - **[maxipesfix/pipecat-visemes](https://github.com/maxipesfix/pipecat-visemes)**: our fork of
   [jptaylor/pipecat-visemes](https://github.com/jptaylor/pipecat-visemes), the server-side analyzer that
-  turns TTS audio into mouth parameters. The fork's `main` is upstream `9c85db4` plus 10 commits
-  (`4524b59`), and `examples/02-pipecat-bot/server/setup.sh` now clones it. Its own write-up is
-  `plans/vowel-rounding-results.md` there.
+  turns TTS audio into mouth parameters. The fork's `main` mirrors upstream (`9c85db4`), kept
+  clean for a possible upstream PR; our work is on its branch `fix/vowel-rounding` (upstream plus
+  11 commits), which `examples/02-pipecat-bot/server/setup.sh` clones. Its own write-up is
+  `plans/vowel-rounding-results.md` on that branch.
 
 No upstream PRs have been opened.
 

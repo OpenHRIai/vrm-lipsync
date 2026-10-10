@@ -6,10 +6,12 @@
 # defines.
 set -euo pipefail
 
-# Our fork of jptaylor/pipecat-visemes: upstream plus analyzer fixes measured
-# with its accuracy benchmark (close vowels no longer read as nasal murmurs,
-# vowel-identity scoring) and the text-informed tier enabled in bot.py.
+# Our fork of jptaylor/pipecat-visemes. The fork's main mirrors upstream; this
+# branch adds analyzer fixes measured with its accuracy benchmark (close vowels
+# no longer read as nasal murmurs, vowel-identity scoring) and the
+# text-informed tier enabled in bot.py.
 REPO="https://github.com/maxipesfix/pipecat-visemes.git"
+BRANCH="fix/vowel-rounding"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vendor"
 
 if ! command -v uv >/dev/null 2>&1; then
@@ -19,12 +21,19 @@ fi
 
 if [ -d "$DIR/.git" ]; then
   echo "==> Updating $DIR"
-  # Clones made before the switch to the fork still point at upstream.
+  # Clones made before the switch to the fork still point at upstream, and
+  # clones of the fork's main track only main.
   git -C "$DIR" remote set-url origin "$REPO"
-  git -C "$DIR" pull --ff-only origin main
+  git -C "$DIR" fetch origin "$BRANCH:refs/remotes/origin/$BRANCH"
+  if git -C "$DIR" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+    git -C "$DIR" switch "$BRANCH"
+    git -C "$DIR" merge --ff-only "origin/$BRANCH"
+  else
+    git -C "$DIR" switch -c "$BRANCH" "origin/$BRANCH"
+  fi
 else
-  echo "==> Cloning $REPO"
-  git clone --depth 1 "$REPO" "$DIR"
+  echo "==> Cloning $REPO ($BRANCH)"
+  git clone --depth 1 --branch "$BRANCH" "$REPO" "$DIR"
 fi
 
 echo "==> Installing server dependencies"
