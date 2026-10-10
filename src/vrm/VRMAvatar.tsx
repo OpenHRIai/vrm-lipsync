@@ -36,6 +36,11 @@ export interface VRMAvatarProps {
   /** Enable orbit/zoom camera controls. Off by default. */
   interactive?: boolean;
   /**
+   * Scales the scene lights; 1 by default. Below 1 keeps toon-shaded skin
+   * from washing out, so mouth shapes read more clearly.
+   */
+  lightIntensity?: number;
+  /**
    * Override the decoder URLs used for Draco/KTX2 compressed models. Point
    * these at self-hosted copies if your CSP blocks the default CDNs.
    */
@@ -76,6 +81,7 @@ export const VRMAvatar = memo(
       dracoDecoderPath,
       ktx2TranscoderPath,
       interactive,
+      lightIntensity,
       className,
       style,
       onLoad,
@@ -92,6 +98,9 @@ export const VRMAvatar = memo(
     // Callbacks live in a ref so identity changes never re-create the scene.
     const handlers = useRef({ onLoad, onProgress, onError });
     handlers.current = { onLoad, onProgress, onError };
+    // Read at scene creation; later changes are applied in place below.
+    const lightIntensityRef = useRef(lightIntensity);
+    lightIntensityRef.current = lightIntensity;
 
     useImperativeHandle(
       ref,
@@ -123,6 +132,7 @@ export const VRMAvatar = memo(
         dracoDecoderPath,
         ktx2TranscoderPath,
         interactive,
+        lightIntensity: lightIntensityRef.current,
         onProgress: (p) => handlers.current.onProgress?.(p),
       });
       stageRef.current = stage;
@@ -172,6 +182,11 @@ export const VRMAvatar = memo(
       ktx2TranscoderPath,
       interactive,
     ]);
+
+    // Applied in place: a slider dragging the light should not reload the model.
+    useEffect(() => {
+      stageRef.current?.setLightIntensity(lightIntensity ?? 1);
+    }, [lightIntensity]);
 
     // A bare LipsyncFeed is adapted here so the common case stays a one-liner
     // while custom sources bypass the mapper entirely.

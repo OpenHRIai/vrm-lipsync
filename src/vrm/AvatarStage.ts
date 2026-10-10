@@ -23,6 +23,12 @@ export interface AvatarStageOptions {
   cameraTarget?: { x: number; y: number; z: number };
   /** Enable orbit/zoom camera controls. Off by default. */
   interactive?: boolean;
+  /**
+   * Scales the scene lights; 1 by default. Toon-shaded (MToon) skin
+   * saturates toward white under strong light, so below 1 brings out the
+   * face's shading, mouth included.
+   */
+  lightIntensity?: number;
   /** Override decoder URLs for Draco/KTX2 compressed models. */
   dracoDecoderPath?: string;
   ktx2TranscoderPath?: string;
@@ -55,6 +61,8 @@ export class AvatarStage {
   private source: LipsyncSource | null = null;
 
   private controls: OrbitControls | null = null;
+  private keyLight = new THREE.DirectionalLight(0xffffff);
+  private ambientLight = new THREE.AmbientLight(0xffffff);
   private frameHandle = 0;
   private running = false;
   private disposed = false;
@@ -91,10 +99,16 @@ export class AvatarStage {
       this.controls.update();
     }
 
-    const key = new THREE.DirectionalLight(0xffffff, Math.PI);
-    key.position.set(1, 1, 1).normalize();
-    this.scene.add(key);
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.4 * Math.PI));
+    this.keyLight.position.set(1, 1, 1).normalize();
+    this.scene.add(this.keyLight);
+    this.scene.add(this.ambientLight);
+    this.setLightIntensity(options.lightIntensity ?? 1);
+  }
+
+  /** Scale the scene lights (see `AvatarStageOptions.lightIntensity`). */
+  setLightIntensity(scale: number): void {
+    this.keyLight.intensity = scale * Math.PI;
+    this.ambientLight.intensity = scale * 0.4 * Math.PI;
   }
 
   /** Point the mouth at a viseme source, or `null` to leave it at rest. */
