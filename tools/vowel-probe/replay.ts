@@ -52,8 +52,27 @@ export interface Probe {
   audio: string;
   duration: number;
   segments: ProbeSegment[];
-  /** The RTVI server-message data, exactly as the bot would send it. */
-  message: { kf: number[][]; ev: [number, string, number, number][] };
+  /**
+   * The RTVI server-message data for the analyzer fed the audio directly:
+   * word timings that arrive after a vowel was analyzed are too late for it.
+   */
+  message: ProbeMessage;
+  /**
+   * Everything the live bot's LipsyncProcessor delivered, as one message: its
+   * keyframes wait in the delivery queue until just before playout, and word
+   * timings arriving meanwhile revise them (the correction buffer).
+   */
+  buffered?: ProbeMessage;
+}
+
+export interface ProbeMessage {
+  kf: number[][];
+  ev: [number, string, number, number][];
+}
+
+/** The probe as the live bot delivers it, if the fixture has that view. */
+export function withBuffer(probe: Probe): Probe | null {
+  return probe.buffered ? { ...probe, message: probe.buffered } : null;
 }
 
 export interface ProbeFixture {

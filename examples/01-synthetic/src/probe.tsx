@@ -19,6 +19,7 @@ import {
   type ReplayFrame,
   type SegmentScore,
   type Viseme,
+  withBuffer,
 } from "../../../tools/vowel-probe/replay";
 
 /**
@@ -34,11 +35,25 @@ import {
  * width, rounding) before any VRM mapping or smoothing, with the expected
  * vowel's target pose dashed behind it — so a wrong shape can be pinned on
  * the analyzer or on what the VRM layer does with it.
+ *
+ * The fourth pane is what the live bot sends for the same audio: its
+ * keyframes wait in a delivery queue until just before playout, and word
+ * timings arriving meanwhile correct them (the correction buffer). The panes
+ * before it show the analyzer fed the audio directly, without that chance.
+ *
+ * `?probes=probes.next.json` shows another capture (`capture.py --out`), the
+ * page's counterpart of the test's VOWEL_PROBES.
  */
 
 const MODEL_URL = "/RikiMinami.vrm";
-const FIXTURE_URL = "/vowel-probe/probes.json";
+const FIXTURE_URL = `/vowel-probe/${
+  new URLSearchParams(window.location.search).get("probes")?.replace(/[^\w.-]/g, "") ||
+  "probes.json"
+}`;
 const RATES = [1, 0.5, 0.25] as const;
+// Scene light scale for the avatars. Full light washes the toon-shaded face
+// out to near white, which hides the mouth's shape.
+const DEFAULT_LIGHT = 0.5;
 // Ramp for the reference avatar between vowels of a multi-vowel probe.
 const REF_RAMP_SEC = 0.04;
 
@@ -58,11 +73,43 @@ const btnPicked: React.CSSProperties = { ...btn, background: "#1e293b", borderCo
 const PASS = "#22c55e";
 const FAIL = "#ef4444";
 
-interface Scored {
+interface View {
   probe: Probe;
   frames: ReplayFrame[];
   scores: SegmentScore[];
 }
+
+interface Scored extends View {
+  /** The same probe as the live bot delivers it, with the correction buffer. */
+  buffered: View | null;
+}
+
+function scoreView(probe: Probe): View {
+  const frames = replay(probe);
+  return { probe, frames, scores: probe.segments.map((s) => score(probe, s, frames)) };
+}
+
+const inSentence = (probe: Probe) => probe.id.endsWith("-mid");
+const GROUPS = [
+  {
+    label: "word alone",
+    title: "The word is the whole utterance, so it is also the first word",
+    has: (p: Probe) => p.segments.length === 1 && !inSentence(p),
+    short: (p: Probe) => p.text,
+  },
+  {
+    label: "in a sentence",
+    title: 'The word fourth in "Okay, now say …, please."',
+    has: inSentence,
+    short: (p: Probe) => `…${/say (.+?),/.exec(p.text)?.[1] ?? p.text}…`,
+  },
+  {
+    label: "sequence",
+    title: "Five vowels in one utterance",
+    has: (p: Probe) => p.segments.length !== 1,
+    short: (p: Probe) => p.text,
+  },
+];
 
 function frameAt(frames: ReplayFrame[], t: number): VisemeWeights {
   if (frames.length === 0) return { ...ZERO_VISEMES };
@@ -205,6 +252,7 @@ function App() {
   const [selected, setSelected] = useState(0);
   const [rate, setRate] = useState<(typeof RATES)[number]>(0.5);
   const [loop, setLoop] = useState(true);
+  const [light, setLight] = useState(DEFAULT_LIGHT);
   const [playing, setPlaying] = useState(false);
   const [t, setT] = useState(0);
 
@@ -221,8 +269,8 @@ function App() {
       .then((fixture) =>
         setScored(
           fixture.probes.map((probe) => {
-            const frames = replay(probe);
-            return { probe, frames, scores: probe.segments.map((s) => score(probe, s, frames)) };
+            const buffered = withBuffer(probe);
+            return { ...scoreView(probe), buffered: buffered && scoreView(buffered) };
           }),
         ),
       )
@@ -235,6 +283,9 @@ function App() {
   // Both avatars read the shared playhead, so they cannot drift apart.
   const [pipelineSource] = useState<LipsyncSource>(() => ({
     sampleVisemes: () => frameAt(currentRef.current?.frames ?? [], timeRef.current),
+  }));
+  const [bufferedSource] = useState<LipsyncSource>(() => ({
+    sampleVisemes: () => frameAt(currentRef.current?.buffered?.frames ?? [], timeRef.current),
   }));
   const [referenceSource] = useState<LipsyncSource>(() => ({
     sampleVisemes: () => referenceAt(currentRef.current?.probe ?? null, timeRef.current),
@@ -329,6 +380,12 @@ function App() {
 
   const passed = scored?.flatMap((s) => s.scores).filter((s) => s.avatarOk).length ?? 0;
   const total = scored?.flatMap((s) => s.scores).length ?? 0;
+  const bufferedScores = scored?.flatMap((s) => s.buffered?.scores ?? []) ?? [];
+  const bufferedPassed = bufferedScores.filter((s) => s.avatarOk).length;
+  const bufferedFrame =
+    current?.buffered?.frames[
+      Math.min(current.buffered.frames.length - 1, Math.max(0, Math.round(t / FRAME_SEC)))
+    ] ?? null;
 
   return (
     <>
@@ -336,26 +393,45 @@ function App() {
         <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
           <strong>Vowel probe</strong>
           <span style={{ opacity: 0.6, fontSize: 12 }}>
-            {scored ? `${passed}/${total} vowels render correctly` : "replaying fixtures…"} · A = analyzer
-            sent the right pose, V = avatar visibly shows it
+            {scored
+              ? `${passed}/${total} vowels render correctly` +
+                (bufferedScores.length ? `, ${bufferedPassed}/${bufferedScores.length} with the correction buffer` : "")
+              : "replaying fixtures…"}{" "}
+            · A = analyzer sent the right pose, V = avatar visibly shows it, B = live bot (with the correction
+            buffer) visibly shows it
           </span>
         </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {scored?.map((s, i) => (
-            <button key={s.probe.id} style={i === selected ? btnPicked : btn} onClick={() => setSelected(i)}>
-              {s.probe.text}
-              {s.scores.map((sc, j) => (
-                <span key={j}>
-                  <Badge ok={sc.analyzerOk} label="A" />
-                  <Badge ok={sc.avatarOk} label="V" />
-                </span>
+        {GROUPS.map((group) => {
+          const members = scored?.map((s, i) => ({ s, i })).filter(({ s }) => group.has(s.probe)) ?? [];
+          if (members.length === 0) return null;
+          return (
+            <div key={group.label} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 12, opacity: 0.6, width: 92 }} title={group.title}>
+                {group.label}
+              </span>
+              {members.map(({ s, i }) => (
+                <button
+                  key={s.probe.id}
+                  title={s.probe.text}
+                  style={i === selected ? btnPicked : btn}
+                  onClick={() => setSelected(i)}
+                >
+                  {group.short(s.probe)}
+                  {s.scores.map((sc, j) => (
+                    <span key={j}>
+                      <Badge ok={sc.analyzerOk} label="Analyzer" />
+                      <Badge ok={sc.avatarOk} label="Visible" />
+                      {s.buffered && <Badge ok={s.buffered.scores[j].avatarOk} label="Buffered" />}
+                    </span>
+                  ))}
+                </button>
               ))}
-            </button>
-          ))}
-        </div>
+            </div>
+          );
+        })}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", minHeight: 0 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", minHeight: 0 }}>
         {[
           {
             key: "reference",
@@ -375,14 +451,24 @@ function App() {
             sub: "TTS audio → analyzer → feed → mapper → smoother",
             source: pipelineSource as LipsyncSource | null,
           },
+          {
+            key: "buffered",
+            title: "Live bot sends",
+            sub: current?.buffered
+              ? "same, after the correction buffer: word timings revise queued keyframes"
+              : "no buffered view in this fixture (re-run capture.py)",
+            source: current?.buffered ? (bufferedSource as LipsyncSource | null) : null,
+            pose: bufferedFrame,
+          },
         ].map((pane) => (
           <div key={pane.key} style={{ position: "relative", minHeight: 0, borderRight: "1px solid #2a2e35" }}>
-            {pane.source ? (
+            {pane.key === "buffered" && !pane.source ? null : pane.source ? (
               <VRMAvatar
                 modelUrl={MODEL_URL}
                 idleAnimationUrl="/idle_loop.vrma"
                 source={pane.source}
                 interactive
+                lightIntensity={light}
                 style={{ position: "absolute", inset: 0 }}
                 fallback={
                   <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
@@ -395,10 +481,17 @@ function App() {
                 <AnalyzerMouth frame={rawFrame} expect={activeSegment?.expect ?? null} />
               </div>
             )}
-            <div style={{ position: "absolute", top: 8, left: 12, pointerEvents: "none" }}>
+            <div style={{ position: "absolute", top: 8, left: 12, right: 12, pointerEvents: "none" }}>
               <div style={{ fontWeight: 600 }}>{pane.title}</div>
               <div style={{ fontSize: 12, opacity: 0.7 }}>{pane.sub}</div>
+              {"pose" in pane && pane.pose && (
+                <div style={{ fontSize: 12, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
+                  sent open {pane.pose.openness.toFixed(2)} · width {pane.pose.width.toFixed(2)} · round{" "}
+                  {pane.pose.rounding.toFixed(2)}
+                </div>
+              )}
             </div>
+
           </div>
         ))}
       </div>
@@ -415,6 +508,19 @@ function App() {
           ))}
           <label style={{ fontSize: 13, display: "flex", gap: 4, alignItems: "center" }}>
             <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} /> loop
+          </label>
+          <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center", marginLeft: 8 }}>
+            light
+            <input
+              type="range"
+              min={0.2}
+              max={1}
+              step={0.05}
+              value={light}
+              onChange={(e) => setLight(Number(e.target.value))}
+              style={{ width: 90 }}
+            />
+            <code style={{ fontSize: 12, opacity: 0.7 }}>{light.toFixed(2)}</code>
           </label>
           <code style={{ fontSize: 12, opacity: 0.7, marginLeft: 8 }}>
             {t.toFixed(3)}s / {current?.probe.duration.toFixed(2) ?? "–"}s
@@ -457,9 +563,10 @@ function App() {
 
         <div style={{ display: "flex", gap: 24, alignItems: "flex-end", flexWrap: "wrap" }}>
           <Bars weights={shown} highlight={activeSegment?.expect ?? null} />
-          <div style={{ fontSize: 12, lineHeight: 1.6, fontVariantNumeric: "tabular-nums" }}>
+          <div style={{ fontSize: 12, lineHeight: 1.6, fontVariantNumeric: "tabular-nums", maxHeight: 84, overflowY: "auto" }}>
             {current?.probe.segments.map((s, i) => {
               const sc = current.scores[i];
+              const bsc = current.buffered?.scores[i];
               const hz = (v: number | null) => (v === null ? "—" : Math.round(v));
               return (
                 <div key={i} style={{ opacity: s === activeSegment ? 1 : 0.55 }}>
@@ -471,6 +578,14 @@ function App() {
                   {sc.shown[sc.shownAs].toFixed(2)}
                   {sc.events.length > 0 && <> · {sc.events.join(" ")}</>} · F1/F2 ours {hz(s.f1_hz)}/
                   {hz(s.f2_hz)} Praat {hz(s.praat_f1_hz)}/{hz(s.praat_f2_hz)} Hz
+                  {bsc && (
+                    <div>
+                      <span style={{ color: bsc.avatarOk ? PASS : FAIL }}>with correction buffer</span> · sent
+                      open {bsc.pose.openness.toFixed(2)} width {bsc.pose.width.toFixed(2)} round{" "}
+                      {bsc.pose.rounding.toFixed(2)} (≈{bsc.sentAs}) · shown as {bsc.shownAs}{" "}
+                      {bsc.shown[bsc.shownAs].toFixed(2)}
+                    </div>
+                  )}
                 </div>
               );
             })}

@@ -1,17 +1,26 @@
 """Capture vowel-probe fixtures from the real TTS voice and the real analyzer.
 
-Each probe is one short utterance whose vowel we know. It is synthesized with
-the bot's own TTS voice, run through the upstream `FormantLipsyncAnalyzer`
-exactly as `LipsyncProcessor` ingests audio, and packed with the relay's own
-wire encoder. The result is what a browser would receive for that utterance,
-so the client-side test replays it without needing the bot, the keys, or the
-network.
+Each probe is one short utterance whose vowel we know: a word on its own, the
+same word inside a sentence, or a sequence of words. It is synthesized with
+the bot's own TTS voice through the bot's output path, which records when
+each audio chunk and word timestamp arrived, and analyzed two ways:
+
+- `message`: the upstream `FormantLipsyncAnalyzer` fed the audio exactly as
+  `LipsyncProcessor` ingests it, with nothing held back. Word timings that
+  arrive after a vowel was analyzed are too late for it.
+- `buffered`: the real `LipsyncProcessor` replaying the recorded arrivals in
+  real time, then everything it delivered. Analyzed keyframes wait in its
+  delivery queue until shortly before playout, and word timings that arrive
+  meanwhile revise them (the "correction buffer") — what the live bot sends.
+
+Both are packed with the relay's own wire encoder, so the client-side test
+replays them without needing the bot, the keys, or the network.
 
 Writes to assets/vowel-probe/:
-  probes.json   one wire message per probe, plus where its vowel nucleus sits
+  probes.json   both wire messages per probe, plus where its vowel nucleus sits
   audio/        every synthesized clip (warmup included): <key>.wav plus
-                <key>.json with its text and the TTS word timings; the
-                probes' audio also drives the visual check at
+                <key>.json with its text, the TTS word timings and the arrival
+                timeline; the probes' audio also drives the visual check at
                 examples/01-synthetic/probe.html
 
 Run from the repo root (synthesis needs the bot's .env for CARTESIA_API_KEY):
@@ -28,9 +37,11 @@ upstream's benchmark replays them. The bot runs with it on, so the committed
 fixtures are captured with it too.
 
 The audio is committed, so re-running only re-analyzes it and needs no API
-key — that is the loop for testing an analyzer change. Changing a probe's text
-re-synthesizes that probe; --refresh re-synthesizes everything. TTS is not
-deterministic, so either changes the fixtures.
+key — that is the loop for testing an analyzer change (the buffered replay
+runs in real time, about a minute). Changing a probe's text re-synthesizes
+that probe, as does a clip recorded without its arrival timeline; --refresh
+re-synthesizes everything. TTS is not deterministic, so either changes the
+fixtures.
 """
 
 import argparse
@@ -53,7 +64,8 @@ OUT = REPO / "assets/vowel-probe"
 # same audio.
 sys.path.insert(0, str(Path.cwd()))
 
-from benchmarks.common import chunks_16k_float32, synthesize  # noqa: E402
+from benchmarks.common import chunks_16k_float32, make_tts  # noqa: E402
+from benchmarks.record import Example, _run_examples, _Source, _strip_gaps  # noqa: E402
 from lipsync.base_lipsync_analyzer import LipsyncAnalysisContext  # noqa: E402
 from lipsync.formant_lipsync_analyzer import FormantLipsyncAnalyzer  # noqa: E402
 from lipsync.frames import TTSLipsyncFrame  # noqa: E402
@@ -100,8 +112,22 @@ PROBES = [
     ("oh-hose", "oh", "Hose."),
 ]
 
+# The same words inside a sentence, a few words in. A word's timestamp
+# arrives after its audio, so a word that starts the utterance is analyzed
+# before the analyzer knows it (with or without the correction buffer); later
+# words are what the buffer can fix. The comma after the target makes the TTS
+# pause there, so its vowel is the last of its stretch of speech: the TTS word
+# timestamps are too loose (0.1-0.25 s early) to find it by time alone.
+IN_SENTENCE = [
+    (f"{probe_id}-mid", expect, f"Okay, now say {text.rstrip('.').lower()}, please.", text.rstrip("."))
+    for probe_id, expect, text in PROBES
+]
+
 # The way a user actually asks for it: one utterance, five vowels in a row.
 SEQUENCE = ("sequence", ["ih", "aa", "ou", "oh", "ee"], "He. Ha. Who. Hoe. Heh.")
+
+# The bot's output sample rate; recordings are replayed at it bit-exact.
+SAMPLE_RATE = 24000
 
 HOP_SEC = 0.02
 # Speech is split into bursts at gaps quieter than this fraction of the
@@ -126,23 +152,151 @@ class Clip(SimpleNamespace):
     sample_rate: int
     text_timing: dict | None
     sentence: SimpleNamespace
+    # When each audio chunk and text frame reached the lipsync processor
+    # (benchmarks.record's arrival timeline), for the buffered replay.
+    arrival: dict
 
 
-async def synth_cached(key: str, text: str, refresh: bool) -> Clip:
+def load_cached(key: str, text: str) -> Clip | None:
     wav, meta = AUDIO / f"{key}.wav", AUDIO / f"{key}.json"
-    cached = json.loads(meta.read_text()) if meta.exists() else {}
-    if wav.exists() and cached.get("text") == text and not refresh:
-        with wave.open(str(wav), "rb") as w:
-            pcm, rate = w.readframes(w.getnframes()), w.getframerate()
-        timing = cached.get("text_timing")
-    else:
-        print(f"  synthesizing {key}: {text!r}")
-        pcm, rate, timing = await synthesize("cartesia", VOICE, text, with_text=True)
-        write_wav(wav, pcm, rate)
-        meta.write_text(json.dumps({"text": text, "text_timing": timing}, indent=1) + "\n")
+    if not (wav.exists() and meta.exists()):
+        return None
+    cached = json.loads(meta.read_text())
+    if cached.get("text") != text or "arrival" not in cached:
+        return None
+    with wave.open(str(wav), "rb") as w:
+        pcm, rate = w.readframes(w.getnframes()), w.getframerate()
     return Clip(
-        pcm=pcm, sample_rate=rate, text_timing=timing, sentence=SimpleNamespace(text=text)
+        pcm=pcm,
+        sample_rate=rate,
+        text_timing=cached["text_timing"],
+        sentence=SimpleNamespace(text=text),
+        arrival=cached["arrival"],
     )
+
+
+def text_timing(arrival: dict) -> dict:
+    """The arrival timeline as `benchmarks.common.synthesize` reports text timing.
+
+    Times relative to the first audio chunk's receipt (where the TTS starts
+    its word clock), plus the audio received when each frame arrived.
+    """
+    rate, chunks = arrival["sample_rate"], arrival["chunks"]
+    first = chunks[0][0]
+
+    def received(t: float) -> float:
+        return round(sum(size for at, size in chunks if at <= t) / 2 / rate, 6)
+
+    def rows(entries):
+        return [
+            [text, None if pts is None else round(pts - first, 6), received(t)]
+            for t, pts, text in entries
+        ]
+
+    return {
+        "version": 1,
+        "origin": "first-audio-receipt",
+        "anchors": rows(arrival["anchors"]),
+        "words": rows(arrival["words"]),
+    }
+
+
+async def synth_all(wanted: list[tuple[str, str]], refresh: bool) -> dict[str, Clip]:
+    """Every clip, synthesizing the missing ones through the bot's output path.
+
+    Missing clips are spoken in one session by the bot's TTS, through
+    LipsyncProcessor and a real-time playout transport, so their arrival
+    timelines are the live bot's.
+    """
+    clips = {key: clip for key, text in wanted if not refresh and (clip := load_cached(key, text))}
+    missing = [(key, text) for key, text in wanted if key not in clips]
+    if not missing:
+        return clips
+    print(f"synthesizing {len(missing)} clips through the bot's output path:")
+    takes, _ = await _run_examples(
+        [Example(key, text, [], "") for key, text in missing],
+        _Source(tts=make_tts("cartesia", VOICE)),
+        SAMPLE_RATE,
+    )
+    for take in takes:
+        key, text, arrival = take.example.id, take.example.text, take.arrival
+        size = sum(n for _, n in arrival["chunks"])
+        pcm = _strip_gaps(take.pcm, arrival["gaps"], size)
+        timing = text_timing(arrival)
+        write_wav(AUDIO / f"{key}.wav", pcm, SAMPLE_RATE)
+        (AUDIO / f"{key}.json").write_text(
+            json.dumps({"text": text, "text_timing": timing, "arrival": arrival}, indent=1) + "\n"
+        )
+        clips[key] = Clip(
+            pcm=pcm,
+            sample_rate=SAMPLE_RATE,
+            text_timing=timing,
+            sentence=SimpleNamespace(text=text),
+            arrival=arrival,
+        )
+    if failed := [key for key, _ in missing if key not in clips]:
+        sys.exit(f"synthesis failed for: {', '.join(failed)}")
+    return clips
+
+
+async def buffered_messages(
+    clips: dict[str, Clip], order: list[str], text_events: bool
+) -> dict[str, list[dict]]:
+    """What the live bot delivers for each clip, correction buffer included.
+
+    Replays the recorded arrivals in real time through LipsyncProcessor, the
+    output transport and the relay, in one session (so the analyzer warms up
+    on the first clips as it does live), and keeps every lipsync message.
+    """
+    print("replaying through LipsyncProcessor (real time):")
+    takes, _ = await _run_examples(
+        [Example(key, clips[key].sentence.text, [], "") for key in order],
+        _Source(
+            arrivals={key: clips[key].arrival for key in order},
+            pcm={key: clips[key].pcm for key in order},
+        ),
+        SAMPLE_RATE,
+        text_events=text_events,
+    )
+    return {take.example.id: [m["data"] for m in take.messages] for take in takes}
+
+
+def merged(message: dict, delivered: list[dict]) -> dict:
+    """The delivered batches as one wire message, anchored like ``message``."""
+    return {
+        **message,
+        "kf": sorted((row for data in delivered for row in data["kf"]), key=lambda r: r[0]),
+        "ev": sorted((row for data in delivered for row in data["ev"]), key=lambda r: r[0]),
+    }
+
+
+def target_run(debug, clip: Clip, word: str, duration: float) -> tuple[int, int] | None:
+    """The vowel stretch of ``word``, which ends a stretch of speech (IN_SENTENCE).
+
+    A sentence spoken without pauses is one burst, so the per-burst vowel of
+    `vowel_runs` would be the burst's loudest vowel, not this word's. The
+    word's burst is the one overlapping its timed interval (to the next
+    word's timestamp, the pause included) most; its vowel is that burst's last.
+    """
+    words = clip.text_timing["words"]
+    norm = [w.strip(".,!?").lower() for w, _, _ in words]
+    i = norm.index(word.lower())
+    start = words[i][1]
+    end = words[i + 1][1] if i + 1 < len(words) else duration
+    rms = np.array([d.rms for d in debug])
+    bursts = [
+        (a, b)
+        for a, b in runs_above(rms, GAP_FRACTION * rms.max(), MAX_BRIDGE_HOPS)
+        if b - a >= MIN_BURST_HOPS
+    ]
+    if not bursts:
+        return None
+    a, b = max(
+        bursts, key=lambda r: min(debug[r[1] - 1].offset, end) - max(debug[r[0]].offset, start)
+    )
+    burst = rms[a:b]
+    s, e = runs_above(burst, VOWEL_FRACTION * burst.max(), 1)[-1]
+    return a + s, a + e
 
 
 def write_wav(path: Path, pcm: bytes, rate: int):
@@ -279,38 +433,51 @@ async def main(refresh: bool, out: str, text_events: bool):
     OUT.mkdir(parents=True, exist_ok=True)
     if text_events and FixtureTextInputs is None:
         sys.exit("--text-events: this analyzer revision has no text-informed tier")
+    seq_id, seq_expect, seq_text = SEQUENCE
+    warmups = [(f"warmup-{i}", text) for i, text in enumerate(WARMUP)]
+    singles = [(probe_id, expect, text, None) for probe_id, expect, text in PROBES]
+    targets = singles + IN_SENTENCE
+    clips = await synth_all(
+        warmups + [(probe_id, text) for probe_id, _, text, _ in targets] + [(seq_id, seq_text)],
+        refresh,
+    )
+
     kwargs = {"text_events_enabled": True} if text_events else {}
     analyzer = FormantLipsyncAnalyzer(collect_debug=True, **kwargs)
-    await analyzer.start(24000)
-
-    for i, text in enumerate(WARMUP):
-        clip = await synth_cached(f"warmup-{i}", text, refresh)
-        await analyze(analyzer, f"warmup-{i}", clip, text_events)
+    await analyzer.start(SAMPLE_RATE)
+    for key, _ in warmups:
+        await analyze(analyzer, key, clips[key], text_events)
 
     probes = []
-    for probe_id, expect, text in PROBES:
-        clip = await synth_cached(probe_id, text, refresh)
+    for probe_id, expect, text, word in targets:
+        clip = clips[probe_id]
         pcm, rate = clip.pcm, clip.sample_rate
         keyframes, events, debug = await analyze(analyzer, probe_id, clip, text_events)
         runs = vowel_runs(debug)
         if not runs:
             print(f"  ! {probe_id}: no speech found, skipped")
             continue
-        longest = max(runs, key=lambda r: r[1] - r[0])
         duration = len(pcm) / 2 / rate
+        run = (
+            target_run(debug, clip, word, duration)
+            if word
+            else max(runs, key=lambda r: r[1] - r[0])
+        )
+        if run is None:
+            print(f"  ! {probe_id}: {word!r} not found in its timed interval, skipped")
+            continue
         probes.append(
             {
                 "id": probe_id,
                 "text": text,
                 "audio": f"audio/{probe_id}.wav",
                 "duration": round(duration, 3),
-                "segments": [{"expect": expect, **nucleus(debug, longest, praat_formants(pcm, rate))}],
+                "segments": [{"expect": expect, **nucleus(debug, run, praat_formants(pcm, rate))}],
                 "message": wire(probe_id, keyframes, events, duration),
             }
         )
 
-    seq_id, seq_expect, seq_text = SEQUENCE
-    clip = await synth_cached(seq_id, seq_text, refresh)
+    clip = clips[seq_id]
     pcm, rate = clip.pcm, clip.sample_rate
     keyframes, events, debug = await analyze(analyzer, seq_id, clip, text_events)
     runs = vowel_runs(debug)
@@ -332,6 +499,15 @@ async def main(refresh: bool, out: str, text_events: bool):
             "message": wire(seq_id, keyframes, events, duration),
         }
     )
+
+    delivered = await buffered_messages(
+        clips, [key for key, _ in warmups] + [p["id"] for p in probes], text_events
+    )
+    for probe in probes:
+        if probe["id"] in delivered:
+            probe["buffered"] = merged(probe["message"], delivered[probe["id"]])
+        else:
+            print(f"  ! {probe['id']}: buffered replay failed, no buffered view")
 
     (OUT / out).write_text(
         json.dumps({"voice": VOICE, "text_events": text_events, "probes": probes}, indent=1)

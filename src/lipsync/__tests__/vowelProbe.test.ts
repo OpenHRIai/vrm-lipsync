@@ -16,6 +16,10 @@
  *   and smoothing — shows that vowel, visibly. If only this fails, the fault
  *   is client-side.
  *
+ * Each layer is checked twice: on the analyzer fed the audio directly, and
+ * on what the live bot delivers, where word timings that arrive while
+ * keyframes wait in the delivery queue revise them (the correction buffer).
+ *
  * Run with `npm run test:vowels`. Watch and hear the same clips on the
  * avatar at examples/01-synthetic/probe.html. To score another analyzer
  * revision on the same audio, capture it with `--out <file>` and set
@@ -34,6 +38,7 @@ import {
   type Probe,
   type ProbeFixture,
   type ReplayFrame,
+  withBuffer,
 } from "../../../tools/vowel-probe/replay";
 
 const FIXTURE = new URL(
@@ -53,14 +58,22 @@ const cases = probes.flatMap((probe) =>
 );
 
 const replays = new Map<string, ReplayFrame[]>();
-const framesOf = (probe: Probe) => {
-  if (!replays.has(probe.id)) replays.set(probe.id, replay(probe));
-  return replays.get(probe.id)!;
+const framesOf = (probe: Probe, view: string) => {
+  const key = `${view}:${probe.id}`;
+  if (!replays.has(key)) replays.set(key, replay(probe));
+  return replays.get(key)!;
 };
 
-describe("vowel probes: analyzer", () => {
-  it.each(cases)("$name sends the $segment.expect pose", ({ probe, segment }) => {
-    const { pose, sentAs } = score(probe, segment, framesOf(probe));
+const VIEWS = [
+  { view: "direct", probeOf: (probe: Probe): Probe | null => probe },
+  { view: "correction buffer", probeOf: withBuffer },
+];
+
+describe.each(VIEWS)("vowel probes ($view): analyzer", ({ view, probeOf }) => {
+  it.each(cases)("$name sends the $segment.expect pose", ({ probe: base, segment }) => {
+    const probe = probeOf(base);
+    if (!probe) return;
+    const { pose, sentAs } = score(probe, segment, framesOf(probe, view));
     expect(
       sentAs,
       `${SOUNDS[segment.expect]} was sent as open=${fmt(pose.openness)} ` +
@@ -72,9 +85,11 @@ describe("vowel probes: analyzer", () => {
   });
 });
 
-describe("vowel probes: avatar", () => {
-  it.each(cases)("$name shows $segment.expect", ({ probe, segment }) => {
-    const { shown, shownAs, events } = score(probe, segment, framesOf(probe));
+describe.each(VIEWS)("vowel probes ($view): avatar", ({ view, probeOf }) => {
+  it.each(cases)("$name shows $segment.expect", ({ probe: base, segment }) => {
+    const probe = probeOf(base);
+    if (!probe) return;
+    const { shown, shownAs, events } = score(probe, segment, framesOf(probe, view));
     const detail =
       `${SOUNDS[segment.expect]} rendered as ` +
       VISEMES.map((v) => `${v}=${fmt(shown[v])}`).join(" ") +
